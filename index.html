@@ -475,6 +475,7 @@
 
   <div class="historico">
     <h3>🔢 Pedidos bipados (pendentes) — <span id="pd-bip-qtd"></span></h3>
+    <button class="btn-limpar-hist" id="pd-copiar-pend" style="margin:0 0 12px;" onclick="copiarPedidosNaoEmbalados()">📋 Copiar pedidos não embalados</button>
     <table class="tabela-hist">
       <thead>
         <tr>
@@ -1244,6 +1245,57 @@
 
     atualizarCaixas();
   }
+
+  // Copia todos os pedidos registrados (bipados na aba Pedidos) que ainda não foram embalados,
+  // com todas as informações de cada um. Cancelados não entram.
+  window.copiarPedidosNaoEmbalados = function () {
+    const lista = listaBips()
+      .filter(b => !b.cancelado && !registroDe('embalagens', b.pedido))
+      .sort((x, y) => (x.ts || 0) - (y.ts || 0));
+
+    if (lista.length === 0) {
+      alert('Não há pedidos pendentes para copiar.');
+      return;
+    }
+
+    const etapa = r => {
+      if (!r) return 'Não';
+      let t = 'Sim — ' + r.dataHora;
+      if (r.nome) t += ' — ' + r.nome + (r.numeroPessoa !== undefined && r.numeroPessoa !== '' ? ' (Nº ' + r.numeroPessoa + ')' : '');
+      if (r.observacao) t += ' — Obs: ' + r.observacao;
+      return t;
+    };
+
+    const blocos = lista.map(b => [
+      'Pedido: ' + b.pedido,
+      'Campo: ' + rotuloBipTexto(b),
+      'Flex: ' + (ehFlex(b) ? 'Sim' : 'Não'),
+      'Bipado em Pedidos: ' + (b.dataHora || '—'),
+      'Teste&Conferência: ' + etapa(registroDe('teste', b.pedido)),
+      'Embalagem: Não'
+    ].join('\n'));
+
+    const texto = 'PEDIDOS NÃO EMBALADOS — ' + lista.length + ' pedido(s) — ' + new Date().toLocaleString('pt-BR') +
+                  '\n\n' + blocos.join('\n\n');
+
+    const ok = () => alert('✅ ' + lista.length + ' pedido(s) não embalado(s) copiado(s) com todas as informações!');
+    const fallback = () => {
+      const area = document.createElement('textarea');
+      area.value = texto;
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); ok(); }
+      catch (e) { alert('⚠️ Não foi possível copiar automaticamente.'); }
+      document.body.removeChild(area);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(texto).then(ok).catch(fallback);
+    } else {
+      fallback();
+    }
+  };
 
   window.abrirPedidosDia = function () {
     const tentativa = prompt('🔒 Digite a senha para acessar a aba Pedidos:');
