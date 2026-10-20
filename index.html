@@ -347,6 +347,7 @@
   <h1> Contador de Pedidos</h1>
   <p class="subtitulo">Selecione a parte:</p>
   <button class="btn-parte" onclick="abrirParte('teste')">Teste&amp;Conferência</button>
+  <button class="btn-parte" onclick="abrirParte('bipagem')"> Bipagem</button>
   <button class="btn-parte" onclick="abrirParte('embalagens')">📦 Embalagens</button>
   <button class="btn-parte" onclick="abrirPedidosDia()">🧾 Pedidos</button>
   <button class="btn-parte" onclick="abrirSeparacao()">Separação</button>
@@ -474,7 +475,7 @@
   </div>
 
   <div class="historico">
-    <h3>🔢 Pedidos bipados (pendentes) — <span id="pd-bip-qtd"></span></h3>
+    <h3>🔢 Pedidos Impressos (pendentes) — <span id="pd-bip-qtd"></span></h3>
     <button class="btn-limpar-hist" id="pd-copiar-pend" style="margin:0 0 12px;" onclick="copiarPedidosNaoEmbalados()">📋 Copiar pedidos não embalados</button>
     <table class="tabela-hist">
       <thead>
@@ -482,8 +483,9 @@
           <th>Nº Pedido</th>
           <th>Campo</th>
           <th>Teste&amp;Conferência</th>
+          <th>Bipagem</th>
           <th>Embalagem</th>
-          <th>Bipado em Pedidos</th>
+          <th>Pedidos Impressos</th>
           <th>Ação</th>
         </tr>
       </thead>
@@ -520,8 +522,14 @@
   // Padrão inicial de pessoas (numero + nome)
   const PADRAO = {
     teste: [{ numero: 1, nome: 'guilherme' }, { numero: 2, nome: 'matheus' }, { numero: 3, nome: 'wesley' }],
-    embalagens: [{ numero: 1, nome: 'amaral' }, { numero: 2, nome: 'campos' }, { numero: 3, nome: 'juan' }, { numero: 4, nome: 'guilherme' }]
+    embalagens: [{ numero: 1, nome: 'amaral' }, { numero: 2, nome: 'campos' }, { numero: 3, nome: 'juan' }, { numero: 4, nome: 'guilherme' }],
+    bipagem: []   // área Bipagem: mesmas funções da área de Teste (cadastre as pessoas pela tela)
   };
+  // Nomes das partes (com e sem emoji) e partes que aceitam observação (Teste e Bipagem)
+  const NOMES_PARTE = { teste: 'Teste&Conferência', embalagens: '📦 Embalagens', bipagem: ' Bipagem' };
+  const NOMES_PARTE_TXT = { teste: 'Teste&Conferência', embalagens: 'Embalagens', bipagem: 'Bipagem' };
+  const NOMES_PARTE_HTML = { teste: 'Teste&amp;Conferência', embalagens: '📦 Embalagens', bipagem: ' Bipagem' };
+  const PARTES_COM_OBS = ['teste', 'bipagem'];
 
   // ============================================================
   // CONFIGURAÇÃO DO FIREBASE (nuvem compartilhada)
@@ -543,7 +551,7 @@
 
   // Padrão enquanto os dados da nuvem não carregam
   let pessoas = JSON.parse(JSON.stringify(PADRAO));
-  let historico = { embalagens: [], teste: [] };
+  let historico = { embalagens: [], teste: [], bipagem: [] };
   let parteAtual = null;
   let pessoaSelecionada = null;
 
@@ -637,7 +645,7 @@
     document.getElementById('tela-selecao').classList.remove('ativa');
     document.getElementById('tela-nomes').classList.add('ativa');
 
-    const nomeExib = parte === 'teste' ? 'Teste&Conferência' : '📦 Embalagens';
+    const nomeExib = NOMES_PARTE[parte] || parte;
     document.getElementById('titulo-parte').textContent = nomeExib;
     document.getElementById('titulo-hist').textContent = nomeExib;
 
@@ -648,9 +656,9 @@
     document.getElementById('feedback').className = 'msg-feedback';
     document.getElementById('numero-pedido').value = '';
     document.getElementById('observacao').value = '';
-    // Campo de observação aparece apenas na área de Teste
+    // Campo de observação aparece nas áreas de Teste e Bipagem
     document.getElementById('observacao').style.display =
-      parte === 'teste' ? 'block' : 'none';
+      PARTES_COM_OBS.includes(parte) ? 'block' : 'none';
   }
 
   function renderizarCards() {
@@ -803,8 +811,8 @@
     corpo.innerHTML = '';
     const registros = historico[parteAtual] || [];
 
-    // Mostra a coluna de observação apenas na área de Teste
-    const ehTeste = parteAtual === 'teste';
+    // Mostra a coluna de observação nas áreas de Teste e Bipagem
+    const ehTeste = PARTES_COM_OBS.includes(parteAtual);
     document.getElementById('coluna-obs').style.display = ehTeste ? '' : 'none';
 
     if (registros.length === 0) {
@@ -852,7 +860,7 @@
 
   function limparHistorico() {
     if (!confirmarSenha()) return;
-    const nomeParte = parteAtual === 'teste' ? 'Teste&Conferência' : 'Embalagens';
+    const nomeParte = NOMES_PARTE_TXT[parteAtual] || parteAtual;
     if (!confirm(`Apagar todo o histórico de pedidos de ${nomeParte}?`)) return;
     historico[parteAtual] = [];
     salvar();
@@ -862,7 +870,7 @@
 
   function zerarGrupo() {
     if (!confirmarSenha()) return;
-    const nomeParte = parteAtual === 'teste' ? 'Teste&Conferência' : 'Embalagens';
+    const nomeParte = NOMES_PARTE_TXT[parteAtual] || parteAtual;
     if (!confirm(`Zerar todos os pedidos de ${nomeParte}? Isso também apaga o histórico.`)) return;
     historico[parteAtual] = [];
     salvar();
@@ -885,9 +893,9 @@
     if (!corpo) return;
     corpo.innerHTML = '';
 
-    // Junta os registros das duas partes
+    // Junta os registros de todas as partes
     const registros = [];
-    for (const parte of ['teste', 'embalagens']) {
+    for (const parte of ['teste', 'bipagem', 'embalagens']) {
       (historico[parte] || []).forEach(r => registros.push({ ...r, parte }));
     }
     // Mais recentes primeiro
@@ -900,7 +908,7 @@
     const LIMITE_GERAL = 300;
     registros.slice(0, LIMITE_GERAL).forEach(r => {
       const tr = document.createElement('tr');
-      const nomeParte = r.parte === 'teste' ? 'Teste&amp;Conferência' : '📦 Embalagens';
+      const nomeParte = NOMES_PARTE_HTML[r.parte] || r.parte;
       tr.innerHTML = `
         <td>${nomeParte}</td>
         <td><b>Nº ${r.numeroPessoa}</b></td>
@@ -933,13 +941,13 @@
 
   function apagarHistoricoGeral() {
     if (!confirmarSenha()) return;
-    const total = (historico.teste || []).length + (historico.embalagens || []).length;
+    const total = (historico.teste || []).length + (historico.bipagem || []).length + (historico.embalagens || []).length;
     if (total === 0) {
       alert('O histórico já está vazio!');
       return;
     }
     if (!confirm(`Apagar TODO o histórico geral?\n\nSerão removidos ${total} pedido(s) de TODAS as partes, em TODOS os dispositivos.`)) return;
-    historico = { teste: [], embalagens: [] };
+    historico = { teste: [], bipagem: [], embalagens: [] };
     salvar();
     renderizarHistoricoGeral();
     if (parteAtual) {
@@ -1149,7 +1157,7 @@
       html = `<div style="font-size:0.85rem; color:var(--texto-suave);">⏳ Pedidos pendentes</div>
               <div style="font-size:2.2rem; font-weight:800; line-height:1.1;">${r.pend}</div>
               <div style="font-size:0.8rem; color:var(--texto-suave); margin-top:2px;">
-                Total bipado: <b>${r.qtd}</b> − Embalados: <b>${r.reg}</b>
+                Total Impresso: <b>${r.qtd}</b> − Embalados: <b>${r.reg}</b>
               </div>
               <div style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:8px;">
                 <span style="padding:4px 12px; border:2px solid var(--cor2); border-radius:20px; font-size:0.85rem; font-weight:700;">⚡ Flex: ${r.flex}</span>
@@ -1227,7 +1235,7 @@
     corpoBip.innerHTML = '';
     document.getElementById('pd-bip-qtd').textContent = linhas.length + ' pedido(s)';
     if (linhas.length === 0) {
-      corpoBip.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum pedido pendente</td></tr>';
+      corpoBip.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum pedido pendente</td></tr>';
     }
     linhas.forEach(l => {
       const b = l.bip;
@@ -1236,6 +1244,7 @@
         <td><b>${l.pedido}</b></td>
         <td>${b ? rotuloBip(b) + (b.cancelado ? ' <b style="color:#d93025;">❌ CANCELADO</b>' : '') : '<span style="color:var(--texto-suave);">direto na Embalagem</span>'}</td>
         <td>${statusEtapa(achar('teste', l.pedido))}</td>
+        <td>${statusEtapa(achar('bipagem', l.pedido))}</td>
         <td>${statusEtapa(achar('embalagens', l.pedido))}</td>
         <td>${b ? b.dataHora : '—'}</td>
         <td>${b && !b.cancelado ? `<button class="btn-remover" style="position:static;" title="Marcar o pedido ${l.pedido} como cancelado">✖</button>` : '—'}</td>`;
@@ -1272,6 +1281,7 @@
       'Flex: ' + (ehFlex(b) ? 'Sim' : 'Não'),
       'Bipado em Pedidos: ' + (b.dataHora || '—'),
       'Teste&Conferência: ' + etapa(registroDe('teste', b.pedido)),
+      'Bipagem: ' + etapa(registroDe('bipagem', b.pedido)),
       'Embalagem: Não'
     ].join('\n'));
 
