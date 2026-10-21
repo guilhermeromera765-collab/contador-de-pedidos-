@@ -329,6 +329,25 @@
     .btn-parte { padding: 18px; font-size: 1.1rem; }
     .form-add h3 { font-size: 0.9rem; }
   }
+  /* Login por opção */
+  #lg { position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; padding: 20px; }
+  #lg.ativa { display: flex; }
+  #lg .lgc { width: 100%; max-width: 380px; background: var(--card); color: var(--texto); border: 2px solid var(--cor1); border-radius: 14px; padding: 22px; box-shadow: 0 8px 30px var(--sombra); max-height: 92vh; overflow: auto; }
+  #lg h2 { font-size: 1.2rem; margin-bottom: 4px; }
+  #lg .lgd { font-size: 0.85rem; color: var(--texto-suave); margin-bottom: 12px; }
+  #lg .lgt { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; border: 1px solid var(--borda); border-radius: 10px; padding: 4px; margin-bottom: 14px; }
+  #lg .lgt button { border: 0; background: transparent; color: var(--texto-suave); font-weight: 700; padding: 8px; border-radius: 7px; cursor: pointer; font-size: 0.95rem; }
+  #lg .lgt button.on { background: var(--cor2); color: #212121; }
+  #lg label { display: block; font-size: 0.9rem; font-weight: 600; margin-bottom: 10px; }
+  #lg label.c { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+  #lg input[type=email], #lg input[type=password] { display: block; width: 100%; margin-top: 5px; padding: 10px 12px; font-size: 16px; border: 2px solid var(--borda); border-radius: 10px; background: var(--fundo); color: var(--texto); outline: none; }
+  #lg input:focus { border-color: var(--cor1); }
+  #lg .lgb { width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--cor1); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; margin-top: 4px; }
+  #lg .lgb:disabled { opacity: 0.6; }
+  #lg .lgx { width: 100%; padding: 10px; margin-top: 8px; border: 1px solid var(--borda); border-radius: 10px; background: transparent; color: var(--texto-suave); font-weight: 600; cursor: pointer; }
+  #lg .lgm { min-height: 1.3em; margin-top: 10px; font-size: 0.88rem; }
+  #lg .lgm.bad { color: var(--cor1); } #lg .lgm.ok { color: #2e7d32; }
+  #ub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; margin: -14px 0 18px; font-size: 0.85rem; color: var(--texto-suave); }
 </style>
 <base target="_blank">
 <base target="_blank">
@@ -345,6 +364,7 @@
 <!-- TELA 1: Seleção -->
 <div class="tela ativa" id="tela-selecao">
   <h1> Contador de Pedidos</h1>
+  <div id="ub"><span id="ub-txt"></span><button class="btn-limpar-hist" id="ub-btn" type="button" style="margin:0; padding:5px 14px;"></button></div>
   <p class="subtitulo">Selecione a parte:</p>
   <button class="btn-parte" onclick="abrirParte('teste')">Teste&amp;Conferência</button>
   <button class="btn-parte" onclick="abrirParte('bipagem')"> Bipagem</button>
@@ -512,6 +532,29 @@
       <button class="btn-add" onclick="adicionarSeparacao()">Adicionar</button>
     </div>
     <div class="msg-feedback" id="sep-feedback"></div>
+  </div>
+</div>
+
+<div id="lg">
+  <div class="lgc">
+    <h2>🔒 Acesso ao Contador de Pedidos</h2>
+    <div class="lgd" id="lg-area">Entre com sua conta para continuar.</div>
+    <div class="lgt"><button type="button" id="lg-ti" class="on">Entrar</button><button type="button" id="lg-tu">Criar conta</button></div>
+    <form id="lg-fi" novalidate>
+      <label>E-mail<input type="email" id="lg-ie" autocomplete="username" inputmode="email"></label>
+      <label>Senha<input type="password" id="lg-ip" autocomplete="current-password"></label>
+      <label class="c"><input type="checkbox" id="lg-keep"> Manter conectado</label>
+      <button class="lgb" type="submit" id="lg-bi">Entrar</button>
+    </form>
+    <form id="lg-fu" novalidate hidden>
+      <label>E-mail<input type="email" id="lg-ue" autocomplete="username" inputmode="email"></label>
+      <label>Senha (mínimo de 8 caracteres)<input type="password" id="lg-up" autocomplete="new-password"></label>
+      <label>Repita a senha<input type="password" id="lg-up2" autocomplete="new-password"></label>
+      <button class="lgb" type="submit" id="lg-bu">Criar conta</button>
+    </form>
+    <div class="lgm" id="lg-m" role="status" aria-live="polite"></div>
+    <div class="lgd" style="margin:6px 0 0;">Cada opção (Teste, Bipagem, Embalagens…) e a permissão de apagar/alterar são liberadas pelo administrador. Contas novas só entram depois da liberação.</div>
+    <button class="lgx" type="button" id="lg-x">Cancelar</button>
   </div>
 </div>
 
@@ -838,14 +881,11 @@
     }
   }
 
-  // ===== SENHA PARA AÇÕES DE EXCLUSÃO =====
-  const SENHA_EXCLUSAO = 'Liber2628@@';
-
+  // ===== LIBERAÇÃO PARA APAGAR / ALTERAR =====
+  // Em vez de senha, a conta precisa estar liberada pelo administrador (página de administração de acessos).
   function confirmarSenha() {
-    const tentativa = prompt('🔒 Digite a senha para apagar informações:');
-    if (tentativa === null) return false; // usuário cancelou
-    if (tentativa === SENHA_EXCLUSAO) return true;
-    alert('❌ Senha incorreta! A ação foi cancelada.');
+    if (window.mudPodeApagar && window.mudPodeApagar()) return true;
+    alert('🔒 Sua conta não tem liberação para apagar ou alterar informações.\nPeça a liberação ao administrador.');
     return false;
   }
 
@@ -1308,9 +1348,6 @@
   };
 
   window.abrirPedidosDia = function () {
-    const tentativa = prompt('🔒 Digite a senha para acessar a aba Pedidos:');
-    if (tentativa === null) return;
-    if (tentativa !== SENHA_EXCLUSAO) { alert('❌ Senha incorreta! Acesso negado.'); return; }
     document.getElementById('tela-selecao').classList.remove('ativa');
     document.getElementById('tela-pedidos-dia').classList.add('ativa');
     CAMPOS_BIP.forEach(c => {
@@ -1609,6 +1646,151 @@
     });
   }
   renderTudo();
+})();
+</script>
+
+<script>
+// ===== Login por opção do menu principal =====
+// As contas ficam em relatorioAcesso (as mesmas da página de administração). O administrador libera cada opção por pessoa.
+(function () {
+  const ACC = 'relatorioAcesso', SID = Math.random().toString(36).slice(2, 10);
+  const AREAS = { teste: 'Teste&Conferência', bipagem: 'Bipagem', embalagens: 'Embalagens', pedidos: 'Pedidos', separacao: 'Separação' };
+  const $ = id => document.getElementById(id);
+  let sess = null, pend = null, refU = null, refC = null, refP = null;
+  window.mudPodeApagar = () => !!sess && (sess.admin || sess.pode === true);
+  const nuvem = () => typeof usandoNuvem !== 'undefined' && usandoNuvem && db;
+  const uidOf = e => e.trim().toLowerCase().replace(/\./g, ',');
+  const okMail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+  const b64 = b => { const a = new Uint8Array(b); let t = ''; for (let i = 0; i < a.length; i++) t += String.fromCharCode(a[i]); return btoa(t); };
+  const un = t => { const x = atob(t), a = new Uint8Array(x.length); for (let i = 0; i < x.length; i++) a[i] = x.charCodeAt(i); return a; };
+  async function hash(pw, salt) { const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']); return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, k, 256)); }
+  const same = (a, b) => { if (a.length !== b.length) return false; let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; };
+  const can = a => !!sess && (sess.admin || sess.areas[a] === true);
+
+  function msg(t, k) { const m = $('lg-m'); m.textContent = t || ''; m.className = 'lgm' + (k ? ' ' + k : ''); }
+  function tab(up) { $('lg-fi').hidden = up; $('lg-fu').hidden = !up; $('lg-ti').classList.toggle('on', !up); $('lg-tu').classList.toggle('on', up); msg(''); }
+  function openLg(area) { $('lg-area').textContent = area ? 'Para abrir: ' + AREAS[area] : 'Entre com sua conta para continuar.'; $('lg').classList.add('ativa'); tab(false); $('lg-ie').focus(); }
+  function closeLg() { $('lg').classList.remove('ativa'); }
+  function curArea() {
+    const a = document.querySelector('.tela.ativa'); if (!a) return null;
+    if (a.id === 'tela-nomes') return parteAtual;
+    if (a.id === 'tela-pedidos-dia') return 'pedidos';
+    if (a.id === 'tela-separacao') return 'separacao';
+    return null;
+  }
+  function home() {
+    document.querySelectorAll('.tela').forEach(t => t.classList.remove('ativa'));
+    $('tela-selecao').classList.add('ativa');
+    parteAtual = null; pessoaSelecionada = null;
+  }
+  function ui() {
+    $('ub-txt').textContent = sess ? '👤 ' + sess.email : '🔒 Faça login para acessar as opções';
+    $('ub-btn').textContent = sess ? 'Sair' : 'Entrar';
+    document.querySelectorAll('#tela-selecao .btn-parte').forEach(b => {
+      const m = b.getAttribute('onclick') || '';
+      const a = (m.match(/abrirParte\('(\w+)'\)/) || [])[1] || (m.includes('abrirPedidosDia') ? 'pedidos' : m.includes('abrirSeparacao') ? 'separacao' : null);
+      if (!a) return;
+      const ok = can(a);
+      b.style.opacity = ok ? '' : '0.55';
+      b.title = ok ? '' : (sess ? 'Sem acesso: peça a liberação ao administrador' : 'Faça login para acessar');
+    });
+  }
+  function stop() {
+    if (refU) refU.off(); if (refC) refC.off(); if (refP) refP.remove();
+    refU = refC = refP = null;
+  }
+  function out(aviso) {
+    stop();
+    try { localStorage.removeItem('mudLogin'); sessionStorage.removeItem('mudLogin'); } catch (e) {}
+    sess = null;
+    if (curArea()) home();
+    ui();
+    if (aviso) alert(aviso);
+  }
+  function start(uid, u) {
+    stop();
+    sess = { uid, email: u.email, admin: !!u.admin, areas: u.areas || {}, pode: u.podeApagar === true };
+    ui();
+    refU = db.ref(ACC + '/usuarios/' + uid);
+    refU.on('value', s => {
+      const x = s.val();
+      if (!x) { out('Seu acesso foi removido pelo administrador.'); return; }
+      if (x.aprovado === false) { out('Seu acesso foi bloqueado pelo administrador.'); return; }
+      sess = { uid, email: x.email, admin: !!x.admin, areas: x.areas || {}, pode: x.podeApagar === true };
+      ui();
+      const a = curArea();
+      if (a && !can(a)) { home(); alert('Seu acesso a ' + AREAS[a] + ' foi removido pelo administrador.'); }
+    });
+    refP = db.ref(ACC + '/presenca/' + uid + '/' + SID);
+    refC = db.ref('.info/connected');
+    refC.on('value', s => {
+      if (s.val() && refP) refP.onDisconnect().remove().then(() => {
+        if (refP) refP.set({ em: firebase.database.ServerValue.TIMESTAMP, onde: 'Contador de Pedidos' });
+      });
+    });
+  }
+
+  function gate(area, cb) {
+    if (!nuvem()) { alert('⚠️ Sem conexão com o sistema de acesso. Verifique a internet e recarregue a página.'); return; }
+    if (!sess) { pend = { area, cb }; openLg(area); return; }
+    if (!can(area)) { alert('🔒 Você não tem acesso a ' + AREAS[area] + '.\nPeça a liberação ao administrador.'); return; }
+    cb();
+  }
+  const _abrirParte = window.abrirParte, _pedidos = window.abrirPedidosDia, _separacao = window.abrirSeparacao;
+  window.abrirParte = function (p) { gate(p, () => _abrirParte.call(window, p)); };
+  window.abrirPedidosDia = function () { gate('pedidos', () => _pedidos.call(window)); };
+  window.abrirSeparacao = function () { gate('separacao', () => _separacao.call(window)); };
+
+  $('lg-ti').onclick = () => tab(false);
+  $('lg-tu').onclick = () => tab(true);
+  $('lg-x').onclick = () => { pend = null; closeLg(); };
+  $('ub-btn').onclick = () => { if (sess) out('Você saiu da conta.'); else openLg(); };
+
+  $('lg-fu').onsubmit = async ev => {
+    ev.preventDefault();
+    const email = $('lg-ue').value.trim().toLowerCase(), pw = $('lg-up').value;
+    if (!okMail(email)) return msg('Digite um e-mail válido, como nome@empresa.com.', 'bad');
+    if (pw.length < 8) return msg('A senha precisa ter pelo menos 8 caracteres.', 'bad');
+    if (pw !== $('lg-up2').value) return msg('As senhas não são iguais. Digite a mesma senha nos dois campos.', 'bad');
+    if (!nuvem()) return msg('Sem conexão com o sistema de acesso. Verifique a internet.', 'bad');
+    $('lg-bu').disabled = true;
+    try {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const rec = { email, salt: b64(salt), hash: await hash(pw, salt), mensal: false, admin: false, aprovado: false, areas: {}, podeApagar: false, criado: new Date().toISOString(), criadoPor: 'cadastro' };
+      const r = await db.ref(ACC + '/usuarios/' + uidOf(email)).transaction(c => c ? undefined : rec);
+      if (!r.committed) msg('Este e-mail já está cadastrado. Entre com a senha ou use outro e-mail.', 'bad');
+      else { $('lg-fu').reset(); tab(false); $('lg-ie').value = email; $('lg-ip').focus(); msg('Conta criada. Antes do primeiro acesso, o administrador precisa liberar o seu cadastro, as opções que você poderá usar e se você poderá apagar ou alterar informações.', 'ok'); }
+    } catch (e) { msg('Não foi possível criar a conta. Verifique a internet e tente de novo.', 'bad'); }
+    $('lg-bu').disabled = false;
+  };
+
+  const fails = {};
+  $('lg-fi').onsubmit = async ev => {
+    ev.preventDefault();
+    const email = $('lg-ie').value.trim().toLowerCase(), pw = $('lg-ip').value, f = fails[email] || { n: 0, until: 0 }, w = Math.ceil((f.until - Date.now()) / 1000);
+    if (!okMail(email) || !pw) return msg('Digite seu e-mail e sua senha.', 'bad');
+    if (w > 0) return msg('Muitas tentativas erradas. Aguarde ' + w + ' segundos para tentar de novo.', 'bad');
+    if (!nuvem()) return msg('Sem conexão com o sistema de acesso. Verifique a internet.', 'bad');
+    $('lg-bi').disabled = true;
+    try {
+      const u = (await db.ref(ACC + '/usuarios/' + uidOf(email)).once('value')).val(),
+        salt = u && u.salt ? un(u.salt) : crypto.getRandomValues(new Uint8Array(16)), h = await hash(pw, salt);
+      if (u && same(h, u.hash)) {
+        delete fails[email];
+        if (u.aprovado === false) msg('Seu cadastro ainda não foi liberado. Peça ao administrador para liberar o seu acesso e tente de novo.', 'bad');
+        else {
+          try { localStorage.removeItem('mudLogin'); sessionStorage.removeItem('mudLogin'); ($('lg-keep').checked ? localStorage : sessionStorage).setItem('mudLogin', uidOf(email)); } catch (e) {}
+          $('lg-fi').reset(); msg(''); closeLg(); start(uidOf(email), u);
+          if (pend) { const p = pend; pend = null; gate(p.area, p.cb); }
+        }
+      } else { f.n++; if (f.n >= 5) { f.until = Date.now() + 30000; f.n = 0; } fails[email] = f; msg('E-mail ou senha incorretos.', 'bad'); }
+    } catch (e) { msg('Não foi possível entrar. Verifique a internet e tente de novo.', 'bad'); }
+    $('lg-bi').disabled = false;
+  };
+
+  ui();
+  let id = null; try { id = sessionStorage.getItem('mudLogin') || localStorage.getItem('mudLogin'); } catch (e) {}
+  if (id && nuvem()) db.ref(ACC + '/usuarios/' + id).once('value').then(s => { const u = s.val(); if (u && u.aprovado !== false) start(id, u); else out(''); }).catch(() => {});
 })();
 </script>
 
