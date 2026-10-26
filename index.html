@@ -212,7 +212,21 @@ const pode=()=>!!sess&&(sess.admin||sess.pode),
 ok=k=>!!sess&&(['teste','bipagem','embalagens','pedidos','separacao'].includes(k)?(sess.admin||sess.areas[k]===true):k==='admin'?!!sess.admin:k==='mensal'?(sess.admin||sess.mensal):true);
 function perm(){if(!pode()){alert('Sua conta não tem liberação para apagar ou alterar informações. Peça ao administrador.');return false}return true}
 function msg(id,t,k){const e=$(id);if(e){e.textContent=t;e.className='msg '+(k||'')}}
-const save=()=>db.ref('contadorPedidos').set({pessoas:S.pessoas,historico:S.historico});
+// Pessoas e lançamentos usam chaves distintas: dispositivos não sobrescrevem listas inteiras.
+const save=()=>db.ref('contadorPedidos/pessoas').set(S.pessoas).catch(e=>alert('Erro ao salvar pessoas na nuvem: '+e.message));
+const saveLegacy=()=>db.ref('contadorPedidos/historico').set(BASEH).catch(e=>alert('Erro ao atualizar histórico antigo: '+e.message));
+const EXTRA_PATH='contadorPedidosLancamentos';
+let BASEH={},EXTRA={},busyReg=false,busyBip=new Set();
+function syncHistory(){
+ ['teste','bipagem','embalagens'].forEach(g=>{
+  const legacy=arr(BASEH[g]);
+  const newer=Object.entries(EXTRA).filter(([k,v])=>v&&v.area===g).map(([k,v])=>({...v,_id:k}));
+  S.historico[g]=[...legacy,...newer].sort((a,b)=>(b.criadoEm||pd(b.dataHora).ts)-(a.criadoEm||pd(a.dataHora).ts));
+ });
+ refresh();arqSync();
+}
+function novoId(){return Date.now().toString(36)+'-'+Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(16).padStart(2,'0')).join('')}
+
 const PAL=['var(--r)','var(--y)','#546e7a','var(--ok)','#8e1b1b','#f57f17','#78909c'];
 function donut(d,ctr,sz=132,t=18,sel='',fn=''){const tot=d.reduce((a,x)=>a+x.v,0),r=(sz-t)/2,C=2*Math.PI*r,c=sz/2,isel=k=>Array.isArray(sel)?sel.includes(k):sel===k,dim=x=>sel&&sel.length&&!isel(x.k)?.25:1;let off=0;
  const seg=d.filter(x=>x.v>0).map(x=>{const l=x.v/tot*C,o=`<circle r="${r}" cx="${c}" cy="${c}" fill="none" style="stroke:${x.c};opacity:${dim(x)}" stroke-width="${t}" stroke-dasharray="${l} ${C-l}" stroke-dashoffset="${-off}" transform="rotate(-90 ${c} ${c})"/>`;off+=l;return o}).join('');
@@ -256,13 +270,31 @@ function addP(){const n=$('an').value.trim(),nm=$('ann').value.trim().toLowerCas
  if(P(tab).some(p=>p.numero===+n))return alert('Esse número já está em uso nesta parte.');
  P(tab).push({numero:+n,nome:nm});save();$('an').value=$('ann').value='';drawCards()}
 function rmP(n){if(!perm())return;const p=P(tab).find(x=>x.numero===n);if(!confirm(`Remover ${p.nome} (Nº ${n})?`))return;S.pessoas[tab]=P(tab).filter(x=>x.numero!==n);if(sel&&sel.numero===n)sel=null;save();drawCards()}
-function reg(){const v=$('np').value.trim();
- if(!sel)return msg('fb','Selecione uma pessoa primeiro!','e');if(!/^\d{5}$/.test(v))return msg('fb','O pedido deve ter exatamente 5 dígitos!','e');
- const b=BIP['p'+ +v];if(!b||b.cancelado){$('np').value='';return msg('fb',b?`O pedido ${v} foi CANCELADO!`:`O pedido ${v} não está na lista de Pedidos. Bipe-o primeiro na aba Pedidos.`,'e')}
- if(H(tab).some(r=>String(r.pedido)===v)){$('np').value='';return msg('fb',`O pedido ${v} já foi registrado!`,'e')}
- H(tab).unshift({numeroPessoa:sel.numero,nome:sel.nome,pedido:+v,dataHora:nowBR(),observacao:$('ob')?$('ob').value.trim():''});save();
- msg('fb',`Pedido ${v} registrado para ${sel.nome} (Nº ${sel.numero})!`,'ok');$('np').value='';if($('ob'))$('ob').value='';drawCards();drawHist()}
-function limpar(){if(!perm()||!confirm(`Apagar todo o histórico de ${PT[tab]}?`))return;S.historico[tab]=[];save();drawCards();drawHist()}
+async function reg(){
+ const el=$('np');if(!el||busyReg)return;
+ const v=el.value.trim(),areaAtual=tab,pessoa=sel?{...sel}:null;
+ if(!pessoa)return msg('fb','Selecione uma pessoa primeiro!','e');
+ if(!/^\d{5}$/.test(v))return msg('fb','O pedido deve ter exatamente 5 dígitos!','e');
+ const b=BIP['p'+ +v];if(!b||b.cancelado)return msg('fb',b?`O pedido ${v} foi CANCELADO!`:`O pedido ${v} não está na lista de Pedidos. Bipe-o primeiro na aba Pedidos.`,'e');
+ if(H(areaAtual).some(r=>String(r.pedido)===String(+v)))return msg('fb',`O pedido ${v} já foi registrado!`,'e');
+ const row={area:areaAtual,numeroPessoa:pessoa.numero,nome:pessoa.nome,pedido:+v,dataHora:nowBR(),criadoEm:Date.now(),observacao:$('ob')?$('ob').value.trim():''};
+ const id=novoId();busyReg=true;el.disabled=true;
+ msg('fb',`Enviando pedido ${v} para a nuvem…`,'');
+ try{
+  await db.ref(EXTRA_PATH+'/'+id).set(row);
+  EXTRA[id]=row;syncHistory();
+  msg('fb',`Pedido ${v} confirmado na nuvem para ${pessoa.nome}!`,'ok');
+  el.value='';if($('ob'))$('ob').value='';
+ }catch(e){msg('fb',`FALHA AO SALVAR ${v}. Tente novamente. O número foi mantido no campo.`,'e')}
+ finally{busyReg=false;el.disabled=false;el.focus()}
+}
+function limpar(){
+ if(!perm()||!confirm(`Apagar todo o histórico de ${PT[tab]}?`))return;
+ const g=tab;BASEH[g]=[];saveLegacy();
+ const ids=Object.keys(EXTRA).filter(k=>EXTRA[k]&&EXTRA[k].area===g);
+ ids.forEach(k=>delete EXTRA[k]);syncHistory();
+ Promise.all(ids.map(k=>db.ref(EXTRA_PATH+'/'+k).remove())).catch(()=>alert('Erro ao limpar alguns registros da nuvem. Atualize a página e confira.'));
+}
 // ---------- pedidos do dia ----------
 const CP=[['maria','MARIA',1],['roberto','ROBERTO',1],['ports1','PORTS 1',1],['ports2','PORTS 2',1],['gold','GOLD',0]];
 const NC={maria:'MARIA',roberto:'ROBERTO',ports1:'PORTS 1',ports2:'PORTS 2',gold:'GOLD',flex:'FLEX'},TN={manha:'Manhã',tarde:'Tarde'},rot=b=>(NC[b.campo]||b.campo)+(b.flex&&b.campo!=='flex'?' · Flex':'')+((b.flex||b.campo==='flex')&&TN[b.turno]?' '+TN[b.turno]:'');
@@ -270,11 +302,21 @@ V.pedidos=()=>`<div class="card"><h2>Pedidos do dia</h2><p class="m">Bipe o núm
 function bipIn(el,id){el.value=el.value.replace(/\D/g,'').slice(0,5);if(el.value.length===5)bipar(id)}
 function fxTg(id){const c=$('fx_'+id),t=$('ft_'+id);if(t)t.hidden=!c.checked;if(!c.checked)document.querySelectorAll('input[name="ft_'+id+'"]').forEach(x=>x.checked=false)}
 function fxPick(id){const el=$('pi_'+id);if(el&&el.value.length===5)bipar(id)}
-function bipar(id){const el=$('pi_'+id),v=el.value.trim(),k='p'+ +v;
- if(BIP[k]){msg('pm',`O pedido ${v} já foi registrado em ${rot(BIP[k])} (${BIP[k].dataHora})${BIP[k].cancelado?' e está CANCELADO':''}!`,'e');el.value='';return}
+async function bipar(id){
+ const el=$('pi_'+id);if(!el||busyBip.has(id))return;
+ const v=el.value.trim();if(!/^\d{5}$/.test(v))return;
+ const k='p'+ +v;
+ if(BIP[k]){msg('pm',`O pedido ${v} já foi registrado em ${rot(BIP[k])}!`,'e');el.value='';return}
  const r={pedido:+v,campo:id,dataHora:nowBR(),dia:hoje(),ts:Date.now()},f=$('fx_'+id);
  if(f&&f.checked){const q=document.querySelector('input[name="ft_'+id+'"]:checked');if(!q){msg('pm',`Flex: escolha Manhã ou Tarde para registrar o pedido ${v}.`,'e');return}r.flex=true;r.turno=q.value}
- BIP[k]=r;el.value='';dPed();pendDraw();db.ref(BP+'/'+k).set(r).then(()=>msg('pm',`Pedido ${v} registrado em ${rot(r)}!`,'ok')).catch(()=>msg('pm','Salvo só neste aparelho: sem permissão na nuvem.','e'));el.focus()}
+ busyBip.add(id);el.disabled=true;msg('pm',`Enviando pedido ${v} para a nuvem…`,'');
+ try{
+  await db.ref(BP+'/'+k).set(r);
+  BIP[k]=r;el.value='';dPed();pendDraw();
+  msg('pm',`Pedido ${v} confirmado na nuvem em ${rot(r)}!`,'ok');
+ }catch(e){msg('pm',`FALHA AO SALVAR ${v}. Tente novamente; o número permanece no campo.`,'e')}
+ finally{busyBip.delete(id);el.disabled=false;el.focus()}
+}
 function dPed(){const e=$('pt');if(!e)return;const a=bips(),dias=[...new Set(a.map(b=>b.dia))].sort().reverse(),hj=hoje();
  CP.forEach(([id])=>{const c=$('c_'+id);if(c)c.textContent='— hoje: '+a.filter(b=>b.dia===hj&&!b.cancelado&&b.campo===id).length});
  const rows=dias.map(d=>{const x=a.filter(b=>b.dia===d),v=x.filter(b=>!b.cancelado),em=v.filter(b=>emb(b.pedido)).length,c=id=>v.filter(b=>b.campo===id).length;
@@ -302,8 +344,8 @@ function rmS(n){if(!perm()||!confirm('Remover da Separação?'))return;delete SE
 V.hist=()=>{const R=[];['teste','bipagem','embalagens'].forEach(g=>H(g).forEach(r=>R.push({...r,g,t:pd(r.dataHora).ts}))),R.sort((a,b)=>b.t-a.t);
  return `<div class="card"><h2>Histórico geral — todas as partes</h2><div class="tw"><table><thead><tr><th>Parte</th><th>#</th><th>Nome</th><th>Pedido</th><th>Data/Hora</th><th></th></tr></thead><tbody>${R.slice(0,300).map(r=>`<tr><td>${PT[r.g]}</td><td><b>Nº ${r.numeroPessoa}</b></td><td>${cap(r.nome)}</td><td><b>${r.pedido}</b></td><td>${esc(r.dataHora)}</td><td><button class="x" style="position:static" onclick="delH('${r.g}',${r.pedido},'${r.dataHora}')">×</button></td></tr>`).join('')||'<tr><td colspan="6" class="m">Nenhum pedido</td></tr>'}</tbody></table></div><div class="row"><button class="bt o" onclick="delAll()">${I.trash}Apagar histórico geral</button></div></div>
 <div class="card"><h3>Separação — pessoas (${Object.keys(SEP).length})</h3><div class="m">${Object.values(SEP).filter(x=>x&&x.nome).map(p=>`Nº ${p.numero} ${cap(p.nome)}`).join(' · ')||'Nenhuma'}</div></div>`};
-function delH(g,p,d){if(!perm()||!confirm(`Apagar o pedido ${p}?`))return;S.historico[g]=H(g).filter(r=>!(String(r.pedido)===String(p)&&r.dataHora===d));save()}
-function delAll(){if(!perm()||!confirm('Apagar TODO o histórico de TODAS as partes?'))return;S.historico={teste:[],bipagem:[],embalagens:[]};save()}
+function delH(g,p,d){if(!perm()||!confirm(`Apagar o pedido ${p}?`))return;{const rows=H(g).filter(r=>String(r.pedido)===String(p)&&r.dataHora===d);rows.forEach(r=>{if(r._id){delete EXTRA[r._id];db.ref(EXTRA_PATH+'/'+r._id).remove().catch(()=>alert('Falha ao excluir registro na nuvem.'))}});BASEH[g]=arr(BASEH[g]).filter(r=>!(String(r.pedido)===String(p)&&r.dataHora===d));saveLegacy();syncHistory()}}
+function delAll(){if(!perm()||!confirm('Apagar TODO o histórico de TODAS as partes?'))return;BASEH={teste:[],bipagem:[],embalagens:[]};saveLegacy();const ids=Object.keys(EXTRA);EXTRA={};syncHistory();Promise.all(ids.map(id=>db.ref(EXTRA_PATH+'/'+id).remove())).catch(()=>alert('Erro ao excluir alguns registros na nuvem.'))}
 // ---------- dashboards ----------
 function analyze(g,day,h0=0,h1=23,who=''){const m={};H(g).forEach(r=>{const t=pd(r.dataHora),h=Math.floor(t.tod/3600);if(day!=='all'&&t.iso!==day)return;if(h<h0||h>h1)return;if(who&&who.length&&!who.includes(r.nome))return;const p=m[r.nome]||(m[r.nome]={nome:r.nome,n:0,obs:[],rs:[]});p.rs.push(t);p.n++;if(r.observacao)p.obs.push({...r,t})});
  return Object.values(m).map(p=>{const by={};p.rs.forEach(t=>(by[t.iso]=by[t.iso]||[]).push(t.tod));p.iv=[];Object.values(by).forEach(a=>{a.sort((x,y)=>x-y);for(let i=1;i<a.length;i++)if(a[i]-a[i-1]<=1800)p.iv.push(a[i]-a[i-1])});
@@ -374,7 +416,7 @@ function mDel(k){if(!sess||!sess.admin)return alert('Somente contas de administr
  if(!confirm(`Excluir o registro do pedido ${e.pedido} (${TP[e.t]}) do monitoramento mensal?`))return;
  const x={apagado:true,apagadoPor:sess.email,apagadoEm:nowBR()};Object.assign(e,x);refresh();db.ref(AP+'/'+k).update(x).catch(()=>alert('Não foi possível excluir. Verifique a conexão.'))}
 function mCsv(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csvOf(mRows())],{type:'text/csv;charset=utf-8'}));a.download='monitoramento-'+(MS.d==='all'?MS.m:MS.d)+'.csv';a.click()}
-function arqSync(){if(!sess||!(rd.h&&rd.b&&rd.a))return;const cur={};
+function arqSync(){if(!sess||!(rd.h&&rd.b&&rd.a&&rd.extra))return;const cur={};
  ['embalagens','teste'].forEach(g=>H(g).forEach(r=>{cur[g[0].toUpperCase()+'_'+r.pedido+'_'+String(r.dataHora).replace(/\D/g,'')]={t:g[0].toUpperCase(),pedido:r.pedido,pessoa:'Nº '+r.numeroPessoa+' - '+r.nome,dataHora:String(r.dataHora),dia:pd(r.dataHora).iso,obs:String(r.observacao||'')}}));
  bips().forEach(b=>{cur['B_'+b.pedido]={t:'B',pedido:b.pedido,campo:b.campo||'',flex:!!b.flex,turno:b.turno||'',dataHora:b.dataHora||'',dia:b.dia||pd(b.dataHora).iso,cancelado:!!b.cancelado}});
  const w={};Object.keys(cur).forEach(k=>{const o=ARQ[k],n={...cur[k],gone:false,goneEm:''};if(o&&o.apagado)return;if(!o||o.gone||o.cancelado!==n.cancelado||o.obs!==n.obs){ARQ[k]=n;w[k]=n}});
@@ -517,7 +559,8 @@ V.ajuda=()=>{const L=MAN.filter(m=>vis(m[0])),adm=!!(sess&&sess.admin);
 })();
 // ---------- nuvem ----------
 db.ref('.info/connected').on('value',s=>{$('cl').innerHTML=`<i class="dot ${s.val()?'on':'off'}"></i>${s.val()?'Nuvem conectada':'Sem conexão'}`});
-db.ref('contadorPedidos').on('value',s=>{const d=s.val()||{};S.pessoas=d.pessoas||{};S.historico=d.historico||{};['teste','bipagem','embalagens'].forEach(g=>{S.pessoas[g]=S.pessoas[g]?arr(S.pessoas[g]):JSON.parse(JSON.stringify(PAD[g]));S.historico[g]=arr(S.historico[g])});rd.h=1;refresh();arqSync()});
+db.ref('contadorPedidos').on('value',s=>{const d=s.val()||{};S.pessoas=d.pessoas||{};BASEH=d.historico||{};['teste','bipagem','embalagens'].forEach(g=>{S.pessoas[g]=S.pessoas[g]?arr(S.pessoas[g]):JSON.parse(JSON.stringify(PAD[g]))});rd.h=1;syncHistory()});
+db.ref(EXTRA_PATH).on('value',s=>{EXTRA=s.val()||{};rd.extra=1;syncHistory()});
 db.ref(BP).on('value',s=>{BIP=s.val()||{};rd.b=1;refresh();arqSync()});
 db.ref(SP).on('value',s=>{SEP=s.val()||{};if(tab==='separacao'&&!document.activeElement.matches('input'))render();else pendDraw()});
 db.ref(AP).on('value',s=>{ARQ=s.val()||{};rd.a=1;if(tab==='mensal')refresh();arqSync()});
@@ -561,3 +604,6 @@ sbStart();hdr();render();checkSetup();
 let sid=null;try{sid=sessionStorage.getItem('mudLogin')||localStorage.getItem('mudLogin')}catch(e){}
 if(sid)db.ref(AC+'/usuarios/'+sid).once('value').then(s=>{const u=s.val();if(u&&u.aprovado!==false)start(sid)}).catch(()=>{});
 </script></body></html>
+
+
+alguns pedidos nao estao sendo registrados
