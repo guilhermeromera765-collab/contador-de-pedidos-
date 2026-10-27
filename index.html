@@ -98,6 +98,7 @@ body.tv .pres .pbtn{opacity:.35}body.tv .pres .pbtn:hover{opacity:1}
 .pres .pb{height:calc(var(--u)*1.1);background:var(--bd);border-radius:99px;overflow:hidden;margin:calc(var(--u)*.5) 0}.pres .pb i{display:block;height:100%;background:var(--ok);border-radius:99px;transition:width .6s}.pres .pb i.y{background:var(--y)}
 .pres .sg span{color:var(--mut);font-size:max(11px,calc(var(--u)*.95))}
 .pres .pg2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:calc(var(--u)*1)}.pres .pg3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(var(--u)*1)}
+.pres .cut{display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(var(--u)*9),1fr));gap:calc(var(--u)*1)}.pres .cut>div{border:1px solid var(--bd);border-top:calc(var(--u)*.3) solid var(--y);border-radius:calc(var(--u)*.8);padding:calc(var(--u)*.8) calc(var(--u)*1)}.pres .cut small{display:block;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-size:max(11px,calc(var(--u)*.95))}.pres .cut b{display:block;font-size:calc(var(--u)*2.8);line-height:1.1;font-variant-numeric:tabular-nums}.pres .cut span{color:var(--mut);font-size:max(11px,calc(var(--u)*.95))}.pres .cut .next{border-top-color:var(--r)}.pres .cut .next b{color:var(--r)}.pres .cut .past{opacity:.5;border-top-color:var(--bd)}
 .pres .lgd{font-size:max(11px,calc(var(--u)*.9));font-weight:500;color:var(--mut);margin-left:calc(var(--u)*.8)}.pres .lgd i{display:inline-block;width:calc(var(--u)*.9);height:calc(var(--u)*.9);border-radius:3px;margin:0 4px 0 calc(var(--u)*.6)}.pres i.y{background:var(--y)}.pres i.r{background:var(--r)}
 .pres .hb{display:flex;align-items:flex-end;gap:calc(var(--u)*.5);height:calc(var(--u)*15)}
 .pres .hb>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:calc(var(--u)*.25);font-size:max(10px,calc(var(--u)*.85));color:var(--mut);font-variant-numeric:tabular-nums;min-width:0}
@@ -141,6 +142,8 @@ const I={teste:svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2
  dprod:svg('<path d="M5 20V11M11 20V4M17 20v-6M3 20h18"/>'),
  dteste:svg('<path d="M3 17l5-5 4 4 8-9"/><path d="M15 7h5v5"/>'),
  mensal:svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+ presenca:svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/><circle cx="19" cy="5" r="1.6" fill="currentColor"/>'),
+ coleta:svg('<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/>'),
  trash:svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
  plus:svg('<path d="M12 5v14M5 12h14"/>'),
  copy:svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>'),
@@ -156,28 +159,72 @@ const I={teste:svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2
    Requer a tabela "kv" criada no Supabase (ver CONFIGURAR_SUPABASE.sql). */
 const SB_URL="https://afucdsbabjunmcerqvqh.supabase.co",SB_KEY="sb_publishable_qA2rLSdWdOx99OiyN5DTzA_9BlljKkP";
 const SB=supabase.createClient(SB_URL,SB_KEY);
-let KV={},KV_OK=false,SB_ON=false,LIS=[],HBI=null,SB_CONN=null,SBC=null,LOADING=null,LOST=false;
+let KV={},SB_ON=false,LIS=[],HBI=null,SB_CONN=null,SBC=null,LOST=false;
+/* ===== Economia de tráfego (egress) — versão otimizada =====
+   - Nada da tabela é baixado antes do login (só o cadastro da própria pessoa, na hora de entrar).
+   - Cada conta baixa e escuta em tempo real só os grupos que usa (USE). O arquivo mensal só vai para admin/monitoramento.
+   - Na reconexão, busca só o que mudou (precisa do OTIMIZAR_SUPABASE.sql; sem ele, recarrega só os grupos em uso). */
+let USE=[],READY=[],USEKEY='',NEWDB=null,FILT=true,LASTMS=0,SUBN=0;
+const under=(k,p)=>k===p||k.indexOf(p+"/")===0,inUse=k=>USE.some(p=>under(k,p)),isReady=p=>READY.some(q=>under(p,q));
+const likeEsc=s=>s.replace(/[\\%_]/g,m=>"\\"+m);
+const tsMs=s=>{if(!s)return 0;const t=Date.parse(String(s).replace(" ","T").replace(/(\.\d{3})\d+/,"$1").replace(/([+-]\d\d)$/,"$1:00"));return isNaN(t)?0:t};
+const notaTS=r=>{const t=r?tsMs(r.atualizado_em):0;if(t>LASTMS)LASTMS=t};
 const cl_=v=>v&&typeof v==="object"?JSON.parse(JSON.stringify(v)):v;
 /* Monta o "valor" de um caminho juntando o registro exato + os filhos */
-function sbSnap(p){const P=p+"/",ks=Object.keys(KV).filter(k=>k===p||k.indexOf(P)===0).sort((a,b)=>a.length-b.length);let o=null;
- ks.forEach(k=>{const v=cl_(KV[k]);if(k===p){o=v;return}
+function sbSnap(p,src){src=src||KV;const P=p+"/",ks=Object.keys(src).filter(k=>k===p||k.indexOf(P)===0).sort((a,b)=>a.length-b.length);let o=null;
+ ks.forEach(k=>{const v=cl_(src[k]);if(k===p){o=v;return}
   if(o===null||typeof o!=="object")o={};
   const ps=k.slice(P.length).split("/");let x=o;
   for(let i=0;i<ps.length-1;i++){if(x[ps[i]]===null||typeof x[ps[i]]!=="object")x[ps[i]]={};x=x[ps[i]]}
   x[ps[ps.length-1]]=v});
  return{val:()=>o}}
-function sbDisp(){LIS.forEach(l=>{try{const s=sbSnap(l.p),j=JSON.stringify(s.val());if(l.j===j)return;l.j=j;l.cb(s)}catch(e){}})}
+function sbDisp(){LIS.forEach(l=>{if(!isReady(l.p))return;try{const s=sbSnap(l.p),j=JSON.stringify(s.val());if(l.j===j)return;l.j=j;l.cb(s)}catch(e){}})}
+function sbStat(){if(SB_CONN)SB_CONN({val:()=>SB_ON})}
 function sbFail(e){console.warn("Supabase:",e);const c=document.getElementById("cl");if(c)c.innerHTML='<i class="dot off"></i>Erro ao salvar na nuvem';return Promise.reject(e)}
-async function sbFetch(){const all=[];for(let f=0;;f+=1000){const r=await SB.from("kv").select("k,v").order("k").range(f,f+999);if(r.error)throw r.error;const d=r.data||[];all.push(...d);if(d.length<1000)break}
- const n={};all.forEach(x=>n[x.k]=x.v);KV=n;KV_OK=true;sbDisp()}
-function sbReady(){return KV_OK?Promise.resolve():(LOADING=LOADING||sbFetch().finally(()=>{LOADING=null}))}
+/* Busca só um caminho (registro exato + filhos); "since" = só o que mudou depois dessa data */
+async function sbRows(p,cols,since){const out=[];
+ let q=SB.from("kv").select(cols).eq("k",p);if(since)q=q.gt("atualizado_em",since);const r1=await q;if(r1.error)throw r1.error;out.push(...(r1.data||[]));
+ for(let f=0;;f+=1000){let q2=SB.from("kv").select(cols).like("k",likeEsc(p)+"/%");if(since)q2=q2.gt("atualizado_em",since);
+  const r=await q2.order("k").range(f,f+999);if(r.error)throw r.error;const d=r.data||[];out.push(...d);if(d.length<1000)break}
+ return out.filter(x=>under(x.k,p))}
+async function sbLoad(ps){const got=[];
+ /* marca de tempo antes da carga (1 linha só), para a reconexão buscar apenas o que mudou depois */
+ if(NEWDB){try{const r=await SB.from("kv").select("atualizado_em").order("atualizado_em",{ascending:false}).limit(1);if(!r.error&&r.data&&r.data[0])notaTS(r.data[0])}catch(e){}}
+ for(const p of ps){const rows=await sbRows(p,"k,v");got.push([p,rows])}
+ got.forEach(([p,rows])=>{if(!USE.includes(p))return;Object.keys(KV).forEach(k=>{if(under(k,p))delete KV[k]});rows.forEach(x=>{KV[x.k]=x.v;notaTS(x)});if(!READY.includes(p))READY.push(p)});
+ sbDisp()}
+/* Reconexão: só o que mudou + conferência de exclusões (o arquivo mensal nunca é excluído, então não precisa conferir) */
+async function sbResync(){const ps=READY.slice();if(!ps.length)return;
+ if(!NEWDB||!LASTMS)return sbLoad(ps);
+ const since=new Date(LASTMS-300000).toISOString();
+ for(const p of ps){
+  if(p!=="relatorioArquivo"){const ks=new Set((await sbRows(p,"k")).map(x=>x.k));Object.keys(KV).forEach(k=>{if(under(k,p)&&!ks.has(k))delete KV[k]})}
+  (await sbRows(p,"k,v,atualizado_em",since)).forEach(x=>{if(inUse(x.k)){KV[x.k]=x.v;notaTS(x)}})}
+ sbDisp()}
+function sbEv(p){if(p.eventType==="DELETE"){const k=p.old&&p.old.k;if(k!==undefined&&k in KV){delete KV[k];sbDisp()}return}
+ const r=p.new;if(!r||r.k===undefined||!inUse(r.k))return;KV[r.k]=r.v;notaTS(r);sbDisp()}
+async function sbSub(){const my=++SUBN;
+ if(SBC){const c=SBC;SBC=null;try{SB.removeChannel(c)}catch(e){}}
+ SB_ON=false;LOST=false;sbStat();if(!USE.length)return;
+ if(NEWDB===null){try{const r=await SB.from("kv").select("k,grupo,atualizado_em").limit(1);NEWDB=!r.error}catch(e){NEWDB=false}}
+ if(my!==SUBN)return;
+ const ch=SB.channel("kv-"+Math.random().toString(36).slice(2,9)),tops=USE.filter(p=>p.indexOf("/")<0),paths=USE.filter(p=>p.indexOf("/")>=0),T={schema:"public",table:"kv"};
+ if(NEWDB&&FILT){["INSERT","UPDATE"].forEach(ev=>{if(tops.length)ch.on("postgres_changes",{...T,event:ev,filter:"grupo=in.("+tops.join(",")+")"},sbEv);paths.forEach(p=>ch.on("postgres_changes",{...T,event:ev,filter:"k=eq."+p},sbEv))});
+  ch.on("postgres_changes",{...T,event:"DELETE"},sbEv)}
+ else ch.on("postgres_changes",{...T,event:"*"},sbEv);
+ SBC=ch;ch.subscribe(st=>{if(SBC!==ch)return;if(st==="CHANNEL_ERROR"&&NEWDB&&FILT){console.warn("Supabase: filtro do tempo real recusado; usando modo sem filtro");FILT=false;sbSub();return}const on=st==="SUBSCRIBED";if(on){if(LOST)sbResync().catch(e=>console.warn("Supabase:",e));LOST=false}else if(SB_ON)LOST=true;SB_ON=on;sbStat()})}
+/* Define o que esta conta baixa/escuta. Chamado no login e quando as permissões mudam. */
+function sbUse(list){const key=list.slice().sort().join("|");if(key===USEKEY)return;USEKEY=key;USE=list.slice();
+ READY=READY.filter(p=>USE.includes(p));Object.keys(KV).forEach(k=>{if(!inUse(k))delete KV[k]});LIS.forEach(l=>{if(!isReady(l.p))l.j=undefined});
+ sbSub();
+ const go=()=>{const a=USE.filter(p=>!READY.includes(p));if(!a.length||USEKEY!==key)return;sbLoad(a).catch(e=>{console.warn("Supabase:",e);const c=$("cl");if(c)c.innerHTML='<i class="dot off"></i>Banco indisponível — tentando de novo';setTimeout(go,5000)})};go()}
 async function sbUp(rows){for(let i=0;i<rows.length;i+=200){const r=await SB.from("kv").upsert(rows.slice(i,i+200),{onConflict:"k"});if(r.error)throw r.error}}
 async function sbRm(keys){for(let i=0;i<keys.length;i+=100){const r=await SB.from("kv").delete().in("k",keys.slice(i,i+100));if(r.error)throw r.error}}
 class SBRef{
  constructor(p){this.p=p}
- on(e,cb){if(this.p===".info/connected"){SB_CONN=cb;cb({val:()=>SB_ON});return cb}LIS.push({p:this.p,cb});if(KV_OK)cb(sbSnap(this.p));return cb}
+ on(e,cb){if(this.p===".info/connected"){SB_CONN=cb;cb({val:()=>SB_ON});return cb}LIS.push({p:this.p,cb});if(isReady(this.p))cb(sbSnap(this.p));return cb}
  off(){LIS=LIS.filter(l=>l.p!==this.p)}
- once(){return sbReady().then(()=>sbSnap(this.p))}
+ async once(){const rows=await sbRows(this.p,"k,v"),m={};rows.forEach(x=>m[x.k]=x.v);return sbSnap(this.p,m)}
  _kids(p){const P=p+"/";return Object.keys(KV).filter(k=>k===p||k.indexOf(P)===0)}
  _write(sets,dels){const rm=[],rows=[];
   dels.forEach(p=>this._kids(p).forEach(k=>{rm.push(k);delete KV[k]}));
@@ -187,20 +234,16 @@ class SBRef{
  set(v){return v===null?this.remove():this._write({[this.p]:v},[])}
  update(o){const s={},d=[];for(const k in o){const p=this.p+"/"+k;if(o[k]===null)d.push(p);else s[p]=o[k]}return this._write(s,d)}
  remove(){return this._write({},[this.p])}
- async transaction(fn){await sbReady();const cur=sbSnap(this.p).val(),nv=fn(cur);if(nv===undefined)return{committed:false};await this.set(nv);return{committed:true}}
+ async transaction(fn){const cur=(await this.once()).val(),nv=fn(cur);if(nv===undefined)return{committed:false};await this.set(nv);return{committed:true}}
 }
-function sbStart(){if(SBC)return;
- SBC=SB.channel("kv-tempo-real").on("postgres_changes",{event:"*",schema:"public",table:"kv"},p=>{if(p.eventType==="DELETE"&&p.old){delete KV[p.old.k]}else if(p.new&&p.new.k!==undefined){KV[p.new.k]=p.new.v}sbDisp()})
- .subscribe(st=>{const on=st==="SUBSCRIBED";if(on){if(LOST&&KV_OK)sbFetch().catch(()=>{});LOST=false}else if(SB_ON)LOST=true;SB_ON=on;if(SB_CONN)SB_CONN({val:()=>SB_ON})});
- const tryLoad=()=>sbReady().catch(e=>{console.warn("Supabase:",e);const c=$("cl");if(c)c.innerHTML='<i class="dot off"></i>Banco indisponível — tentando de novo';setTimeout(tryLoad,5000)});tryLoad()}
 
 const db={ref:p=>new SBRef(p)},AC='relatorioAcesso',BP='contadorPedidosBip',SP='contadorSeparacao',AP='relatorioArquivo';
 const PAD={teste:[{numero:1,nome:'guilherme'},{numero:2,nome:'matheus'},{numero:3,nome:'wesley'}],embalagens:[{numero:1,nome:'amaral'},{numero:2,nome:'campos'},{numero:3,nome:'juan'},{numero:4,nome:'guilherme'}],bipagem:[]};
 const PN={teste:'Teste&Conferência',bipagem:'Bipagem',embalagens:'Embalagens'},PT={teste:'Teste&Conferência',bipagem:'Bipagem',embalagens:'Embalagens'};
-const GR=[['Painel',['apresentacao']],['Operação',['teste','bipagem','embalagens','pedidos','separacao']],['Análise',['hist','dprod','dteste','mensal']],['Administração',['admin']]];let GO={};
-const T=[['apresentacao','Apresentação'],['teste','Teste&amp;Conferência'],['bipagem','Bipagem'],['embalagens','Embalagens'],['pedidos','Pedidos'],['separacao','Separação'],['hist','Histórico geral'],['dprod','Dashboard Produção'],['dteste','Dashboard Teste'],['mensal','Monitoramento mensal'],['admin','Administração de acessos']];
+const GR=[['Painel',['apresentacao']],['Operação',['teste','bipagem','embalagens','pedidos','separacao']],['Análise',['hist','dprod','dteste','mensal','coleta']],['Administração',['admin','presenca']]];let GO={};
+const T=[['apresentacao','Apresentação'],['teste','Teste&amp;Conferência'],['bipagem','Bipagem'],['embalagens','Embalagens'],['pedidos','Pedidos'],['separacao','Separação'],['hist','Histórico geral'],['dprod','Dashboard Produção'],['dteste','Dashboard Teste'],['mensal','Monitoramento mensal'],['admin','Administração de acessos'],['presenca','Presença'],['coleta','Coletas (janela e motorista)']];
 const TL=Object.fromEntries(T);
-let S={pessoas:{},historico:{}},BIP={},SEP={},ARQ={},sess=null,tab='teste',sel=null,DS={day:'all',h0:'',h1:'',p:[],fb:{}},MS={m:'',d:'all',tp:'all',q:''},rd={h:0,b:0,a:0};
+let S={pessoas:{},historico:{}},BIP={},SEP={},ARQ={},sess=null,tab='teste',sel=null,DS={day:'all',h0:'',h1:'',p:[],fb:{}},MS={m:'',d:'all',tp:'all',q:'',s:'all',w:'all',h0:'',h1:''},rd={h:0,b:0,a:0};
 const H=g=>S.historico[g]||(S.historico[g]=[]),P=g=>S.pessoas[g]||(S.pessoas[g]=[]),arr=x=>Array.isArray(x)?x:Object.values(x||{});
 const bips=()=>Object.values(BIP).filter(b=>b&&b.pedido!==undefined);
 const pd=s=>{const m=String(s||'').match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)/);return m?{iso:m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'),tod:m[4]*3600+m[5]*60,ts:new Date(+m[3],m[2]-1,m[1],m[4],m[5]).getTime()}:{iso:'',tod:0,ts:0}};
@@ -209,7 +252,7 @@ const hoje=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth(
 const fd=i=>i.split('-').reverse().join('/'),ft=s=>{if(s==null)return'–';s=Math.round(s);const m=Math.floor(s/60);return m?m+'min '+String(s%60).padStart(2,'0')+'s':s+'s'};
 const mean=a=>a.reduce((x,y)=>x+y,0)/a.length,cap=s=>esc(s).replace(/\b\w/g,c=>c.toUpperCase());
 const pode=()=>!!sess&&(sess.admin||sess.pode),
-ok=k=>!!sess&&(['teste','bipagem','embalagens','pedidos','separacao'].includes(k)?(sess.admin||sess.areas[k]===true):k==='admin'?!!sess.admin:k==='mensal'?(sess.admin||sess.mensal):true);
+ok=k=>!!sess&&(['teste','bipagem','embalagens','pedidos','separacao','coleta'].includes(k)?(sess.admin||sess.areas[k]===true):(k==='admin'||k==='presenca')?!!sess.admin:k==='mensal'?(sess.admin||sess.mensal):true);
 function perm(){if(!pode()){alert('Sua conta não tem liberação para apagar ou alterar informações. Peça ao administrador.');return false}return true}
 function msg(id,t,k){const e=$(id);if(e){e.textContent=t;e.className='msg '+(k||'')}}
 // Pessoas e lançamentos usam chaves distintas: dispositivos não sobrescrevem listas inteiras.
@@ -245,8 +288,8 @@ function render(){document.body.classList.toggle('pv',!!sess&&tab==='apresentaca
  $('nv').innerHTML=GR.map(([g,ks],gi)=>ks[0]==='admin'&&!(sess&&sess.admin)?'':`<div class="grp${GO[gi]?' closed':''}"><button class="gh" onclick="tg(${gi},this)">${g}${I.chev}</button><div class="gb"><div class="gl">${ks.map(k=>`<button class="ni${k===tab?' on':''}${ok(k)?'':' lk'}" onclick="go('${k}')">${I[k]}<span>${TL[k]}</span></button>`).join('')}</div></div></div>`).join('');
  pendDraw();if(!sess){$('vw').innerHTML='';return}
  $('vw').innerHTML=(V[tab]||V.teste)();after()}
-function after(){if(tab==='admin')admDraw();if(PN[tab]){drawCards();drawHist()}if(tab==='pedidos')dPed();if(tab==='mensal'){mList();bkUI()}}
-function refresh(){pendDraw();if(!sess)return;if(PN[tab]){drawCards();drawHist()}else if(tab==='pedidos')dPed();else if(tab==='admin')admDraw();else if(tab==='mensal'&&document.activeElement&&document.activeElement.matches('input'))mList();else if(!document.activeElement.matches('#vw input,#vw textarea,#vw select')){const y=scrollY;$('vw').innerHTML=(V[tab])();after();scrollTo(0,y)}}
+function after(){if(tab==='admin')admDraw();if(tab==='presenca')presDraw();if(PN[tab]){drawCards();drawHist()}if(tab==='pedidos'){dPed();cutFill()}if(tab==='coleta')coDraw();if(tab==='mensal'){mList();bkUI()}}
+function refresh(){pendDraw();if(!sess)return;if(PN[tab]){drawCards();drawHist()}else if(tab==='pedidos')dPed();else if(tab==='coleta')coDraw();else if(tab==='admin')admDraw();else if(tab==='presenca')presDraw();else if(tab==='mensal'&&document.activeElement&&document.activeElement.matches('input'))mList();else if(!document.activeElement.matches('#vw input,#vw textarea,#vw select')){const y=scrollY;$('vw').innerHTML=(V[tab])();after();scrollTo(0,y)}}
 // ---------- pendentes ----------
 const emb=n=>H('embalagens').some(r=>+r.pedido===+n);
 function pendDraw(){const a=bips(),v=a.filter(b=>!b.cancelado),pe=v.filter(b=>!emb(b.pedido)).length,fl=b=>b.flex||b.campo==='flex',fM=v.filter(b=>fl(b)&&b.turno==='manha').length,fT=v.filter(b=>fl(b)&&b.turno==='tarde').length,fS=v.filter(b=>fl(b)&&!b.turno).length,go_=v.filter(b=>b.campo==='gold').length,c=a.length-v.length;
@@ -290,15 +333,18 @@ async function reg(){
 }
 function limpar(){
  if(!perm()||!confirm(`Apagar todo o histórico de ${PT[tab]}?`))return;
- const g=tab;BASEH[g]=[];saveLegacy();
+ const g=tab;if(arr(BASEH[g]).length){BASEH[g]=[];saveLegacy()}
  const ids=Object.keys(EXTRA).filter(k=>EXTRA[k]&&EXTRA[k].area===g);
  ids.forEach(k=>delete EXTRA[k]);syncHistory();
  Promise.all(ids.map(k=>db.ref(EXTRA_PATH+'/'+k).remove())).catch(()=>alert('Erro ao limpar alguns registros da nuvem. Atualize a página e confira.'));
 }
 // ---------- pedidos do dia ----------
 const CP=[['maria','MARIA',1],['roberto','ROBERTO',1],['ports1','PORTS 1',1],['ports2','PORTS 2',1],['gold','GOLD',0]];
-const NC={maria:'MARIA',roberto:'ROBERTO',ports1:'PORTS 1',ports2:'PORTS 2',gold:'GOLD',flex:'FLEX'},TN={manha:'Manhã',tarde:'Tarde'},rot=b=>(NC[b.campo]||b.campo)+(b.flex&&b.campo!=='flex'?' · Flex':'')+((b.flex||b.campo==='flex')&&TN[b.turno]?' '+TN[b.turno]:'');
-V.pedidos=()=>`<div class="card"><h2>Pedidos do dia</h2><p class="m">Bipe o número do pedido no campo correspondente. Marque Flex quando for Flex e escolha se é para Manhã ou Tarde. Flex e Gold entram no total.</p><div class="g3">${CP.map(([id,n,f])=>`<div><label>${n} <b id="c_${id}"></b></label><input type="text" id="pi_${id}" maxlength="5" inputmode="numeric" autocomplete="off" placeholder="Bipe (5 dígitos)" oninput="bipIn(this,'${id}')">${f?`<label class="ck"><input type="checkbox" id="fx_${id}" onchange="fxTg('${id}')"> Flex</label><div class="fxt" id="ft_${id}" hidden><label class="ck"><input type="radio" name="ft_${id}" value="manha" onchange="fxPick('${id}')"> Manhã</label><label class="ck"><input type="radio" name="ft_${id}" value="tarde" onchange="fxPick('${id}')"> Tarde</label></div>`:''}</div>`).join('')}</div><div class="msg" id="pm"></div></div><div id="pt"></div>`;
+const NC={maria:'MARIA',roberto:'ROBERTO',ports1:'PORTS 1',ports2:'PORTS 2',gold:'GOLD',flex:'FLEX'},TN={manha:'Manhã',tarde:'Tarde'},rot=b=>(NC[b.campo]||b.campo)+(b.flex&&b.campo!=='flex'?' · Flex':'')+((b.flex||b.campo==='flex')&&TN[b.turno]?' '+TN[b.turno]:'')+(b.anterior?' · Dia anterior':'');
+V.pedidos=()=>`<div class="card"><h2>Pedidos do dia</h2><p class="m">Bipe o número do pedido no campo correspondente. Marque Flex quando for Flex e escolha se é para Manhã ou Tarde. Marque Pedido do dia anterior quando o pedido for de ontem. Flex, Gold e pedidos do dia anterior entram no total.</p><div class="g3">${CP.map(([id,n,f])=>`<div><label>${n} <b id="c_${id}"></b></label><input type="text" id="pi_${id}" maxlength="5" inputmode="numeric" autocomplete="off" placeholder="Bipe (5 dígitos)" oninput="bipIn(this,'${id}')">${f?`<label class="ck"><input type="checkbox" id="fx_${id}" onchange="fxTg('${id}')"> Flex</label><div class="fxt" id="ft_${id}" hidden><label class="ck"><input type="radio" name="ft_${id}" value="manha" onchange="fxPick('${id}')"> Manhã</label><label class="ck"><input type="radio" name="ft_${id}" value="tarde" onchange="fxPick('${id}')"> Tarde</label></div>`:''}<label class="ck"><input type="checkbox" id="da_${id}"> Pedido do dia anterior</label></div>`).join('')}</div><div class="msg" id="pm"></div></div>
+<div class="card"><h3>Horário de corte</h3><p class="m">Defina o horário limite de cada Mercado Livre. Ele aparece na aba Apresentação e vale todos os dias até você alterar. Deixe em branco para remover.</p>
+<div class="g3">${CUTK.map(([id,n])=>`<div><label>${n}</label><input type="time" id="ct_${id}" value="${esc((COR[id]&&COR[id].h)||'')}"></div>`).join('')}</div>
+<div class="row"><button class="bt" onclick="cutSave()">Salvar horários de corte</button></div><div class="msg" id="ct_msg" role="status"></div><p class="m" id="ct_info"></p></div><div id="pt"></div>`;
 function bipIn(el,id){el.value=el.value.replace(/\D/g,'').slice(0,5);if(el.value.length===5)bipar(id)}
 function fxTg(id){const c=$('fx_'+id),t=$('ft_'+id);if(t)t.hidden=!c.checked;if(!c.checked)document.querySelectorAll('input[name="ft_'+id+'"]').forEach(x=>x.checked=false)}
 function fxPick(id){const el=$('pi_'+id);if(el&&el.value.length===5)bipar(id)}
@@ -309,6 +355,7 @@ async function bipar(id){
  if(BIP[k]){msg('pm',`O pedido ${v} já foi registrado em ${rot(BIP[k])}!`,'e');el.value='';return}
  const r={pedido:+v,campo:id,dataHora:nowBR(),dia:hoje(),ts:Date.now()},f=$('fx_'+id);
  if(f&&f.checked){const q=document.querySelector('input[name="ft_'+id+'"]:checked');if(!q){msg('pm',`Flex: escolha Manhã ou Tarde para registrar o pedido ${v}.`,'e');return}r.flex=true;r.turno=q.value}
+ const da=$('da_'+id);if(da&&da.checked)r.anterior=true;
  busyBip.add(id);el.disabled=true;msg('pm',`Enviando pedido ${v} para a nuvem…`,'');
  try{
   await db.ref(BP+'/'+k).set(r);
@@ -319,14 +366,14 @@ async function bipar(id){
 }
 function dPed(){const e=$('pt');if(!e)return;const a=bips(),dias=[...new Set(a.map(b=>b.dia))].sort().reverse(),hj=hoje();
  CP.forEach(([id])=>{const c=$('c_'+id);if(c)c.textContent='— hoje: '+a.filter(b=>b.dia===hj&&!b.cancelado&&b.campo===id).length});
- const rows=dias.map(d=>{const x=a.filter(b=>b.dia===d),v=x.filter(b=>!b.cancelado),em=v.filter(b=>emb(b.pedido)).length,c=id=>v.filter(b=>b.campo===id).length;
- return `<tr><td>${fd(d)}${d===hj?' <b>(hoje)</b>':''}</td>${['maria','roberto','ports1','ports2'].map(i=>`<td>${c(i)}</td>`).join('')}<td>${v.filter(b=>b.flex||b.campo==='flex').length}</td><td>${c('gold')}</td><td><b>${v.length}</b></td><td class="bad">${x.length-v.length}</td><td>${em}</td><td><b>${v.length-em}</b></td><td><button class="bt o" style="padding:4px 10px" onclick="apDia('${d}')">${I.trash}</button></td></tr>`}).join('');
+ const rows=dias.map(d=>{const x=a.filter(b=>b.dia===d),v=x.filter(b=>!b.cancelado),em=v.filter(b=>emb(b.pedido)).length,c=id=>v.filter(b=>b.campo===id&&!b.anterior).length;
+ return `<tr><td>${fd(d)}${d===hj?' <b>(hoje)</b>':''}</td>${['maria','roberto','ports1','ports2'].map(i=>`<td>${c(i)}</td>`).join('')}<td>${v.filter(b=>b.flex||b.campo==='flex').length}</td><td>${c('gold')}</td><td>${v.filter(b=>b.anterior).length}</td><td><b>${v.length}</b></td><td class="bad">${x.length-v.length}</td><td>${em}</td><td><b>${v.length-em}</b></td><td><button class="bt o" style="padding:4px 10px" onclick="apDia('${d}')">${I.trash}</button></td></tr>`}).join('');
  const pl=a.filter(b=>b.cancelado||b.dia===hj||!emb(b.pedido)).sort((x,y)=>(y.ts||0)-(x.ts||0)),ac=(p,g)=>H(g).find(r=>String(r.pedido)===String(p)),st=r=>r?`<span style="color:var(--ok);font-weight:700">${esc(r.dataHora.split(' ')[1]||'')}</span>`:'<span class="m">— não</span>';
  const asc=[...dias].reverse().slice(-14),vv=a.filter(b=>!b.cancelado),
   trend=asc.map(d=>({l:fd(d).slice(0,5),v:a.filter(b=>b.dia===d&&!b.cancelado).length})),
   cmp=['maria','roberto','ports1','ports2','gold','flex'].map((i,k)=>({l:NC[i],v:vv.filter(b=>b.campo===i).length,c:PAL[k]}));
  e.innerHTML=`<div class="g2"><div class="card"><h3>Pedidos por dia</h3>${area(trend)}</div><div class="card"><h3>Por campo</h3>${donut(cmp,vv.length)}</div></div>
-<div class="card"><h3>Histórico por dia</h3><div class="tw"><table><thead><tr><th>Data</th><th>Maria</th><th>Roberto</th><th>Ports 1</th><th>Ports 2</th><th>Flex</th><th>Gold</th><th>Total</th><th>Cancel.</th><th>Embal.</th><th>Pend.</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="12" class="m">Nenhum pedido bipado</td></tr>'}</tbody></table></div></div>
+<div class="card"><h3>Histórico por dia</h3><div class="tw"><table><thead><tr><th>Data</th><th>Maria</th><th>Roberto</th><th>Ports 1</th><th>Ports 2</th><th>Flex</th><th>Gold</th><th>Dia ant.</th><th>Total</th><th>Cancel.</th><th>Embal.</th><th>Pend.</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="13" class="m">Nenhum pedido bipado</td></tr>'}</tbody></table></div></div>
 <div class="card"><h3>Pedidos impressos (pendentes) — ${pl.length}</h3><div class="row" style="margin:0 0 10px"><button class="bt o" onclick="copiaPend()">${I.copy}Copiar pedidos não embalados</button></div><div class="tw"><table><thead><tr><th>Pedido</th><th>Campo</th><th>Teste</th><th>Bipagem</th><th>Embalagem</th><th>Impresso</th><th></th></tr></thead><tbody>${pl.map(b=>`<tr><td><b>${b.pedido}</b></td><td>${esc(rot(b))}${b.cancelado?' <b class="bad">CANCELADO</b>':''}</td><td>${st(ac(b.pedido,'teste'))}</td><td>${st(ac(b.pedido,'bipagem'))}</td><td>${st(ac(b.pedido,'embalagens'))}</td><td>${esc(b.dataHora)}</td><td>${b.cancelado?'<span class="bd bad">Cancelado</span>':`<button class="bt o sm" title="Cancelar este pedido (ele não é apagado)" onclick="cancel(${b.pedido})">Cancelar</button>`}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Nenhum pedido pendente</td></tr>'}</tbody></table></div></div>`}
 function cancel(n){if(!perm()||!confirm(`Cancelar o pedido ${n}? Ele não será apagado, apenas marcado como CANCELADO.`))return;const x={cancelado:true,canceladoEm:nowBR(),canceladoDia:hoje()};Object.assign(BIP['p'+n],x);dPed();pendDraw();db.ref(BP+'/p'+n).update(x)}
 function apDia(d){if(!perm())return;const l=bips().filter(b=>b.dia===d);if(!confirm(`Excluir o dia ${fd(d)} (${l.length} pedido(s))?`))return;const u={};l.forEach(b=>{u['p'+b.pedido]=null;delete BIP['p'+b.pedido]});dPed();pendDraw();db.ref(BP).update(u)}
@@ -344,8 +391,8 @@ function rmS(n){if(!perm()||!confirm('Remover da Separação?'))return;delete SE
 V.hist=()=>{const R=[];['teste','bipagem','embalagens'].forEach(g=>H(g).forEach(r=>R.push({...r,g,t:pd(r.dataHora).ts}))),R.sort((a,b)=>b.t-a.t);
  return `<div class="card"><h2>Histórico geral — todas as partes</h2><div class="tw"><table><thead><tr><th>Parte</th><th>#</th><th>Nome</th><th>Pedido</th><th>Data/Hora</th><th></th></tr></thead><tbody>${R.slice(0,300).map(r=>`<tr><td>${PT[r.g]}</td><td><b>Nº ${r.numeroPessoa}</b></td><td>${cap(r.nome)}</td><td><b>${r.pedido}</b></td><td>${esc(r.dataHora)}</td><td><button class="x" style="position:static" onclick="delH('${r.g}',${r.pedido},'${r.dataHora}')">×</button></td></tr>`).join('')||'<tr><td colspan="6" class="m">Nenhum pedido</td></tr>'}</tbody></table></div><div class="row"><button class="bt o" onclick="delAll()">${I.trash}Apagar histórico geral</button></div></div>
 <div class="card"><h3>Separação — pessoas (${Object.keys(SEP).length})</h3><div class="m">${Object.values(SEP).filter(x=>x&&x.nome).map(p=>`Nº ${p.numero} ${cap(p.nome)}`).join(' · ')||'Nenhuma'}</div></div>`};
-function delH(g,p,d){if(!perm()||!confirm(`Apagar o pedido ${p}?`))return;{const rows=H(g).filter(r=>String(r.pedido)===String(p)&&r.dataHora===d);rows.forEach(r=>{if(r._id){delete EXTRA[r._id];db.ref(EXTRA_PATH+'/'+r._id).remove().catch(()=>alert('Falha ao excluir registro na nuvem.'))}});BASEH[g]=arr(BASEH[g]).filter(r=>!(String(r.pedido)===String(p)&&r.dataHora===d));saveLegacy();syncHistory()}}
-function delAll(){if(!perm()||!confirm('Apagar TODO o histórico de TODAS as partes?'))return;BASEH={teste:[],bipagem:[],embalagens:[]};saveLegacy();const ids=Object.keys(EXTRA);EXTRA={};syncHistory();Promise.all(ids.map(id=>db.ref(EXTRA_PATH+'/'+id).remove())).catch(()=>alert('Erro ao excluir alguns registros na nuvem.'))}
+function delH(g,p,d){if(!perm()||!confirm(`Apagar o pedido ${p}?`))return;{const rows=H(g).filter(r=>String(r.pedido)===String(p)&&r.dataHora===d);rows.forEach(r=>{if(r._id){delete EXTRA[r._id];db.ref(EXTRA_PATH+'/'+r._id).remove().catch(()=>alert('Falha ao excluir registro na nuvem.'))}});{const a0=arr(BASEH[g]),a1=a0.filter(r=>!(String(r.pedido)===String(p)&&r.dataHora===d));if(a1.length!==a0.length){BASEH[g]=a1;saveLegacy()}}syncHistory()}}
+function delAll(){if(!perm()||!confirm('Apagar TODO o histórico de TODAS as partes?'))return;if(['teste','bipagem','embalagens'].some(g=>arr(BASEH[g]).length)){BASEH={teste:[],bipagem:[],embalagens:[]};saveLegacy()}const ids=Object.keys(EXTRA);EXTRA={};syncHistory();Promise.all(ids.map(id=>db.ref(EXTRA_PATH+'/'+id).remove())).catch(()=>alert('Erro ao excluir alguns registros na nuvem.'))}
 // ---------- dashboards ----------
 function analyze(g,day,h0=0,h1=23,who=''){const m={};H(g).forEach(r=>{const t=pd(r.dataHora),h=Math.floor(t.tod/3600);if(day!=='all'&&t.iso!==day)return;if(h<h0||h>h1)return;if(who&&who.length&&!who.includes(r.nome))return;const p=m[r.nome]||(m[r.nome]={nome:r.nome,n:0,obs:[],rs:[]});p.rs.push(t);p.n++;if(r.observacao)p.obs.push({...r,t})});
  return Object.values(m).map(p=>{const by={};p.rs.forEach(t=>(by[t.iso]=by[t.iso]||[]).push(t.tod));p.iv=[];Object.values(by).forEach(a=>{a.sort((x,y)=>x-y);for(let i=1;i<a.length;i++)if(a[i]-a[i-1]<=1800)p.iv.push(a[i]-a[i-1])});
@@ -396,51 +443,76 @@ V.mensal=()=>{const all=Object.values(ARQ).filter(e=>e&&e.t&&!e.apagado),ms=[...
  const EM=all.filter(e=>(e.dia||'').startsWith(MS.m)),dias=[...new Set(EM.map(e=>e.dia))].sort();if(MS.d!=='all'&&!dias.includes(MS.d))MS.d='all';
  const one=MS.d!=='all',E=one?EM.filter(e=>e.dia===MS.d):EM,n=(t,f)=>E.filter(e=>e.t===t&&(!f||f(e))).length,dd=one?[MS.d]:dias;
  const ml=m=>new Date(+m.slice(0,4),+m.slice(5)-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
- const hh=Array(24).fill(0);E.filter(e=>e.t==='B'&&!e.cancelado).forEach(e=>hh[Math.floor(pd(e.dataHora).tod/3600)]++);const h0=hh.findIndex(x=>x),h1=23-[...hh].reverse().findIndex(x=>x);
+ const who=[...new Set(E.map(e=>e.t==='B'?rot(e):e.pessoa).filter(Boolean))].sort(),hh=Array(24).fill(0);E.filter(e=>e.t==='B'&&!e.cancelado).forEach(e=>hh[Math.floor(pd(e.dataHora).tod/3600)]++);const h0=hh.findIndex(x=>x),h1=23-[...hh].reverse().findIndex(x=>x);
  const trend=one?(h0<0?'<p class="m">Nenhum pedido bipado neste dia.</p>':area(hh.slice(h0,h1+1).map((v,i)=>({l:String(h0+i).padStart(2,'0')+'h',v})))):area(dd.map(d=>({l:fd(d).slice(0,5),v:E.filter(e=>e.dia===d&&e.t==='B'&&!e.cancelado).length})));
  const pp={},pz=k=>pp[k]||(pp[k]={T:0,E:0,G:0});E.filter(e=>e.t!=='B').forEach(e=>{pz(e.pessoa)[e.t]++});const pr=Object.entries(pp).sort((a,b)=>b[1].G+b[1].T+b[1].E-a[1].G-a[1].T-a[1].E);
  return `<div class="prh"><b>liber Automotive — Relatório do monitoramento ${one?'diário':'mensal'}</b><span>${one?'Dia '+fd(MS.d):ml(MS.m)} · Gerado em ${nowBR()}${sess?' por '+esc(sess.email):''}</span></div>
 <div class="card"><h2>Monitoramento mensal</h2><p class="m">Tudo o que passa pelo sistema é guardado aqui, mesmo que depois seja excluído. Excluídos ficam marcados na coluna Situação.</p>
-<div class="row noprint" style="align-items:flex-end"><div><label>Mês</label><select onchange="MS.m=this.value;MS.d='all';render()">${ms.map(m=>`<option value="${m}"${m===MS.m?' selected':''}>${ml(m)}</option>`).join('')}</select></div>
-<div><label>Dia</label><select onchange="MS.d=this.value;render()"><option value="all">Todos os dias</option>${dias.slice().reverse().map(d=>`<option value="${d}"${d===MS.d?' selected':''}>${fd(d)}</option>`).join('')}</select></div>
+<div class="row noprint" style="align-items:flex-end"><div><label>Mês</label><select onchange="MS.m=this.value;MS.d='all';MS.w='all';render()">${ms.map(m=>`<option value="${m}"${m===MS.m?' selected':''}>${ml(m)}</option>`).join('')}</select></div>
+<div><label>Dia</label><select onchange="MS.d=this.value;MS.w='all';render()"><option value="all">Todos os dias</option>${dias.slice().reverse().map(d=>`<option value="${d}"${d===MS.d?' selected':''}>${fd(d)}</option>`).join('')}</select></div>
 <button class="bt o" onclick="window.print()">${I.print}Imprimir relatório</button></div><p class="m" style="margin-top:10px">Mostrando: <b>${one?fd(MS.d):ml(MS.m)}</b></p></div>
 ${cb(kp('Pedidos bipados',n('B',e=>!e.cancelado),'sem cancelados')+kp('Cancelados',n('B',e=>e.cancelado),'')+kp('Teste&amp;Conferência',n('T'),'registros')+kp('Bipagem',n('G'),'registros')+kp('Embalagens',n('E'),'registros')+kp('Excluídos do sistema',E.filter(e=>e.gone).length,''))}
 <div class="g2"><div class="card"><h3>${one?'Bipados por hora':'Bipados por dia'}</h3>${trend}</div><div class="card"><h3>Por tipo</h3>${donut([{l:'Impressos',v:n('B',e=>!e.cancelado),c:PAL[0]},{l:'Teste',v:n('T'),c:PAL[1]},{l:'Bipagem',v:n('G'),c:PAL[3]},{l:'Embalagem',v:n('E'),c:PAL[2]},{l:'Cancelados',v:n('B',e=>e.cancelado),c:PAL[6]}])}</div></div>
 <div class="card"><h3>Por dia</h3><div class="tw"><table><thead><tr><th>Dia</th><th>Bipados</th><th>Cancelados</th><th>Teste</th><th>Bipagem</th><th>Embalagem</th><th>Excluídos</th></tr></thead><tbody>${dd.map(d=>{const x=E.filter(e=>e.dia===d);return `<tr><td>${fd(d)}</td><td>${x.filter(e=>e.t==='B'&&!e.cancelado).length}</td><td>${x.filter(e=>e.t==='B'&&e.cancelado).length}</td><td>${x.filter(e=>e.t==='T').length}</td><td>${x.filter(e=>e.t==='G').length}</td><td>${x.filter(e=>e.t==='E').length}</td><td>${x.filter(e=>e.gone).length}</td></tr>`}).join('')}</tbody></table></div></div>
 ${pr.length?`<div class="card"><h3>Por pessoa</h3><div class="tw"><table><thead><tr><th>Pessoa</th><th>Teste</th><th>Embalagem</th><th>Bipados</th></tr></thead><tbody>${pr.map(([p,v])=>`<tr><td>${esc(p)}</td><td>${v.T}</td><td>${v.E}</td><td><b>${v.G}</b></td></tr>`).join('')}</tbody></table></div></div>`:''}
-<div class="card"><h3>Registros ${one?'do dia':'do mês'}</h3><div class="row noprint" style="margin-top:0"><select onchange="MS.tp=this.value;mList()"><option value="all">Todos</option><option value="B"${MS.tp==='B'?' selected':''}>Impressos</option><option value="T"${MS.tp==='T'?' selected':''}>Teste&amp;Conferência</option><option value="G"${MS.tp==='G'?' selected':''}>Bipagem</option><option value="E"${MS.tp==='E'?' selected':''}>Embalagem</option></select><input type="text" placeholder="Buscar pedido" value="${esc(MS.q)}" oninput="MS.q=this.value.trim();mList()"><button class="bt o" onclick="mCsv()">Baixar ${one?'dia':'mês'} (.csv)</button></div><div id="ml"></div></div>
+<div class="card"><h3>Registros ${one?'do dia':'do mês'}</h3><div class="row noprint" style="margin-top:0;align-items:flex-end">
+<div><label>Tipo</label><select onchange="MS.tp=this.value;mList()"><option value="all">Todos</option><option value="B"${MS.tp==='B'?' selected':''}>Impressos</option><option value="T"${MS.tp==='T'?' selected':''}>Teste&amp;Conferência</option><option value="G"${MS.tp==='G'?' selected':''}>Bipagem</option><option value="E"${MS.tp==='E'?' selected':''}>Embalagem</option></select></div>
+<div><label>Situação</label><select onchange="MS.s=this.value;mList()"><option value="all">Todas</option><option value="ativo"${MS.s==='ativo'?' selected':''}>Ativo</option><option value="canc"${MS.s==='canc'?' selected':''}>Cancelado</option><option value="gone"${MS.s==='gone'?' selected':''}>Excluído do sistema</option></select></div>
+<div><label>Pessoa/Campo</label><select onchange="MS.w=this.value;mList()"><option value="all">Todos</option>${who.map(w=>`<option value="${esc(w)}"${MS.w===w?' selected':''}>${esc(w)}</option>`).join('')}</select></div>
+<div><label>Hora de</label><select onchange="MS.h0=this.value;mList()"><option value="">Início</option>${Array.from({length:24},(_,h)=>`<option value="${h}"${MS.h0===String(h)?' selected':''}>${hl(h)}</option>`).join('')}</select></div>
+<div><label>Hora até</label><select onchange="MS.h1=this.value;mList()"><option value="">Fim</option>${Array.from({length:24},(_,h)=>`<option value="${h}"${MS.h1===String(h)?' selected':''}>${hl(h)}</option>`).join('')}</select></div>
+<div><label>Pedido</label><input type="text" placeholder="Buscar pedido" value="${esc(MS.q)}" oninput="MS.q=this.value.trim();mList()"></div>
+<button class="bt g" onclick="MS.tp='all';MS.s='all';MS.w='all';MS.h0=MS.h1='';MS.q='';render()">Limpar filtros</button>
+<button class="bt o" onclick="mCsv()">Baixar ${one?'dia':'mês'} (.csv)</button></div><div id="ml"></div></div>
 <div class="card noprint"><h3>Backup dos registros</h3><p class="m">O sistema continua guardando automaticamente tudo o que passa por ele (monitoramento acima). Aqui você também salva uma cópia em arquivos no seu computador.</p><div id="bk"></div></div>`};
-const mRows=()=>Object.entries(ARQ).filter(([k,e])=>e&&e.t&&!e.apagado&&(e.dia||'').startsWith(MS.m)&&(MS.d==='all'||e.dia===MS.d)&&(MS.tp==='all'||e.t===MS.tp)&&(!MS.q||String(e.pedido).includes(MS.q))).map(([k,e])=>({...e,_k:k})).sort((a,b)=>(b.dia+pd(b.dataHora).tod).localeCompare(a.dia+pd(a.dataHora).tod));
+const sitK=e=>e.gone?'gone':e.cancelado?'canc':'ativo',
+mRows=()=>Object.entries(ARQ).filter(([k,e])=>{if(!(e&&e.t&&!e.apagado&&(e.dia||'').startsWith(MS.m)&&(MS.d==='all'||e.dia===MS.d)&&(MS.tp==='all'||e.t===MS.tp)&&(!MS.q||String(e.pedido).includes(MS.q))))return false;
+ if(MS.s!=='all'&&sitK(e)!==MS.s)return false;if(MS.w!=='all'&&(e.t==='B'?rot(e):e.pessoa)!==MS.w)return false;
+ const h=Math.floor(pd(e.dataHora).tod/3600);if(MS.h0!==''&&h<+MS.h0)return false;if(MS.h1!==''&&h>+MS.h1)return false;return true}).map(([k,e])=>({...e,_k:k})).sort((a,b)=>(b.dia+pd(b.dataHora).tod).localeCompare(a.dia+pd(a.dataHora).tod));
 const sit=e=>e.gone?'Excluído do sistema':e.cancelado?'Cancelado':'Ativo';
 function mList(){const e=$('ml');if(!e)return;const r=mRows(),adm=!!(sess&&sess.admin);e.innerHTML=`<p class="m">${r.length} registro(s)${r.length>300?' (mostrando 300)':''}${adm?' · como administrador você pode excluir registros':''}</p><div class="tw"><table><thead><tr><th>Data/Hora</th><th>Tipo</th><th>Pedido</th><th>Pessoa/Campo</th><th>Obs.</th><th>Situação</th>${adm?'<th class="noprint"></th>':''}</tr></thead><tbody>${r.slice(0,300).map(x=>`<tr><td>${esc(x.dataHora)}</td><td>${TP[x.t]}</td><td>${x.pedido}</td><td>${esc(x.t==='B'?rot(x):x.pessoa)}</td><td>${esc(x.obs||'')}</td><td class="${x.gone||x.cancelado?'bad':''}">${sit(x)}</td>${adm?`<td class="noprint"><button class="bt o sm" title="Excluir este registro" data-k="${esc(x._k)}" onclick="mDel(this.dataset.k)">${I.trash}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${adm?7:6}" class="m">Nenhum registro</td></tr>`}</tbody></table></div>`}
-function mDel(k){if(!sess||!sess.admin)return alert('Somente contas de administrador podem excluir registros do monitoramento.');const e=ARQ[k];if(!e)return;
- if(!confirm(`Excluir o registro do pedido ${e.pedido} (${TP[e.t]}) do monitoramento mensal?`))return;
- const x={apagado:true,apagadoPor:sess.email,apagadoEm:nowBR()};Object.assign(e,x);refresh();db.ref(AP+'/'+k).update(x).catch(()=>alert('Não foi possível excluir. Verifique a conexão.'))}
+function rmHist(g,p,d){const m=r=>String(r.pedido)===String(p)&&(d==null||r.dataHora===d),pr=[];
+ H(g).filter(m).forEach(r=>{if(r._id){delete EXTRA[r._id];pr.push(db.ref(EXTRA_PATH+'/'+r._id).remove())}});
+ const a0=arr(BASEH[g]),a1=a0.filter(r=>!m(r));if(a1.length!==a0.length){BASEH[g]=a1;pr.push(saveLegacy())}return pr}
+async function mDel(k){if(!sess||!sess.admin)return alert('Somente contas de administrador podem excluir registros do monitoramento.');const e=ARQ[k];if(!e)return;
+ const B=e.t==='B';
+ if(!confirm(B?`Excluir DEFINITIVAMENTE o pedido ${e.pedido}?\n\nEle será apagado do banco de dados e sairá de todas as áreas (Pedidos, Teste, Bipagem, Embalagens, históricos, dashboards e este monitoramento).`:`Excluir DEFINITIVAMENTE este registro do pedido ${e.pedido} (${TP[e.t]})?\n\nEle será apagado do banco de dados e sairá do histórico dessa etapa e deste monitoramento.`))return;
+ const G={T:'teste',G:'bipagem',E:'embalagens'},pr=[],ks=B?Object.keys(ARQ).filter(x=>ARQ[x]&&String(ARQ[x].pedido)===String(e.pedido)):[k];
+ try{
+  if(B){delete BIP['p'+e.pedido];pr.push(db.ref(BP+'/p'+e.pedido).remove());['teste','bipagem','embalagens'].forEach(g=>pr.push(...rmHist(g,e.pedido)))}
+  else pr.push(...rmHist(G[e.t],e.pedido,e.dataHora));
+  const u={};ks.forEach(x=>{u[x]=null;delete ARQ[x]});pr.push(db.ref(AP).update(u));
+  syncHistory();pendDraw();refresh();
+  await Promise.all(pr)}
+ catch(x){alert('Não foi possível excluir tudo no banco. Atualize a página e confira.')}}
 function mCsv(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csvOf(mRows())],{type:'text/csv;charset=utf-8'}));a.download='monitoramento-'+(MS.d==='all'?MS.m:MS.d)+'.csv';a.click()}
-function arqSync(){if(!sess||!(rd.h&&rd.b&&rd.a&&rd.extra))return;const cur={};
+function arqSync(){if(!sess||!(rd.h&&rd.b&&rd.a&&rd.extra))return;if(!souLider())return bkAuto();const cur={};
  ['embalagens','teste','bipagem'].forEach(g=>H(g).forEach(r=>{const tc=g==='bipagem'?'G':g[0].toUpperCase();cur[tc+'_'+r.pedido+'_'+String(r.dataHora).replace(/\D/g,'')]={t:tc,pedido:r.pedido,pessoa:'Nº '+r.numeroPessoa+' - '+r.nome,dataHora:String(r.dataHora),dia:pd(r.dataHora).iso,obs:String(r.observacao||'')}}));
  bips().forEach(b=>{cur['B_'+b.pedido]={t:'B',pedido:b.pedido,campo:b.campo||'',flex:!!b.flex,turno:b.turno||'',dataHora:b.dataHora||'',dia:b.dia||pd(b.dataHora).iso,cancelado:!!b.cancelado}});
  const w={};Object.keys(cur).forEach(k=>{const o=ARQ[k],n={...cur[k],gone:false,goneEm:''};if(o&&o.apagado)return;if(!o||o.gone||o.cancelado!==n.cancelado||o.obs!==n.obs){ARQ[k]=n;w[k]=n}});
  Object.keys(ARQ).forEach(k=>{const e=ARQ[k];if(e&&!cur[k]&&!e.gone&&!e.apagado){e.gone=true;e.goneEm=nowBR();w[k]=e}});
  if(Object.keys(w).length)db.ref(AP).update(w).catch(()=>{});bkAuto()}
 // ---------- administração ----------
-const AREAS=[['teste','Teste'],['bipagem','Bipagem'],['embalagens','Embalagens'],['pedidos','Pedidos'],['separacao','Separação']];
+const AREAS=[['teste','Teste'],['bipagem','Bipagem'],['embalagens','Embalagens'],['pedidos','Pedidos'],['separacao','Separação'],['coleta','Coletas']];
 let USERS={},PRES={},rUs=null,rPs=null;
 V.admin=()=>!(sess&&sess.admin)?'<div class="card"><h2>Administração de acessos</h2><p class="m">Somente administradores acessam esta área.</p></div>':`<div class="card"><h2>Administração de acessos</h2><p class="m">Veja quem está conectado, adicione ou exclua perfis e defina o que cada conta pode abrir (Teste, Bipagem, Embalagens, Pedidos, Separação, Monitoramento mensal) e se pode apagar ou alterar informações.</p></div>
 <div class="card"><h3>Conectados agora (<span id="n-on">0</span>)</h3><div class="tw"><table><thead><tr><th>E-mail</th><th>Onde</th><th>Conectado desde</th><th>Sessões</th></tr></thead><tbody id="t-on"></tbody></table></div></div>
 <div class="card"><h3>Adicionar perfil</h3><form id="f-add" onsubmit="admAdd(event)" novalidate><div class="g3"><div><label>E-mail</label><input type="text" id="a-email" autocomplete="off"></div><div><label>Senha (mín. 8 caracteres)</label><input type="password" id="a-pw" autocomplete="new-password"></div></div>
 <label class="ck"><input type="checkbox" id="a-mensal"> Liberar Monitoramento mensal</label>
 <div class="m" style="margin:12px 0 2px">Opções do Contador de Pedidos que a conta poderá abrir:</div>
-${AREAS.map(([k,l])=>`<label class="ck"><input type="checkbox" data-area="${k}"> ${l==='Teste'?'Teste&amp;Conferência':l}</label>`).join('')}
+${AREAS.map(([k,l])=>`<label class="ck"><input type="checkbox" data-area="${k}"> ${l==='Teste'?'Teste&amp;Conferência':l==='Coletas'?'Coletas (janela e motorista)':l}</label>`).join('')}
 <label class="ck"><input type="checkbox" id="a-apagar"> Pode apagar e alterar informações (sem pedir senha)</label>
 <label class="ck"><input type="checkbox" id="a-admin"> Administrador (acesso total e a esta área)</label>
 <div class="row"><button class="bt" id="a-btn">Adicionar perfil</button></div><div class="msg" id="m-add" role="status"></div></form></div>
 <div class="card"><h3>Perfis (<span id="n-us">0</span>) <span class="bd bad" id="n-pend" hidden></span></h3><div class="tw"><table><thead><tr><th>E-mail</th><th>Tipo</th><th>Acesso</th><th>Monitoramento mensal</th><th>Opções e ações liberadas</th><th>Situação</th><th>Criado em</th><th></th></tr></thead><tbody id="t-us" onclick="admClick(event)"></tbody></table></div><div class="msg" id="m-us" role="status"></div></div>`;
-function admWatch(){if(!(sess&&sess.admin))return admOff();if(rUs)return;rUs=db.ref(AC+'/usuarios');rUs.on('value',s=>{USERS=s.val()||{};if(tab==='admin')admDraw()});rPs=db.ref(AC+'/presenca');rPs.on('value',s=>{PRES=s.val()||{};if(tab==='admin')admDraw()})}
-function admOff(){if(rUs)rUs.off();if(rPs)rPs.off();rUs=rPs=null;USERS={};PRES={}}
+function admWatch(){if(!(sess&&sess.admin))return admOff();if(rUs)return;rUs=db.ref(AC+'/usuarios');rUs.on('value',s=>{USERS=s.val()||{};admConsolida();if(tab==='admin')admDraw();if(tab==='presenca')presDraw()})}
+/* Junta cadastros que estavam espalhados em várias linhas (areas/x, mensal...) em uma linha só,
+   para que a própria pessoa receba em tempo real só o seu cadastro. Roda uma vez por perfil. */
+const CONS={};function admConsolida(){Object.keys(USERS).forEach(id=>{const P=AC+'/usuarios/'+id;if(USERS[id]&&!CONS[id]&&Object.keys(KV).some(k=>k.indexOf(P+'/')===0)){CONS[id]=1;db.ref(P).set(cl_(USERS[id]))}})}
+function admOff(){if(rUs)rUs.off();rUs=null;USERS={}}
 function admDraw(){if(!sess||!sess.admin||!$('t-us'))return;
  const mail=id=>(USERS[id]&&USERS[id].email)||id.replace(/,/g,'.');
- const rows=Object.keys(PRES).map(id=>{const ss=Object.values(PRES[id]||{}).filter(x=>(x.em||0)>Date.now()-120000);if(!ss.length)return null;return{id,onde:[...new Set(ss.map(x=>x.onde||'—'))].join(', '),desde:Math.min(...ss.map(x=>x.em||Date.now())),n:ss.length}}).filter(Boolean).sort((a,b)=>a.desde-b.desde);
+ const rows=Object.keys(PRES).map(id=>{const ss=Object.values(PRES[id]||{});if(!ss.length)return null;return{id,onde:[...new Set(ss.map(x=>x.onde||'—'))].join(', '),desde:Math.min(...ss.map(x=>x.em||Date.now())),n:ss.length}}).filter(Boolean).sort((a,b)=>a.desde-b.desde);
  $('n-on').textContent=rows.length;
  $('t-on').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(mail(r.id))}</td><td>${esc(r.onde)}</td><td>${new Date(r.desde).toLocaleString('pt-BR')}</td><td>${r.n}</td></tr>`).join(''):'<tr><td colspan="4" class="m">Ninguém conectado agora.</td></tr>';
  const ids=Object.keys(USERS).filter(i=>USERS[i]).sort((a,b)=>(USERS[a].aprovado===false?0:1)-(USERS[b].aprovado===false?0:1)||mail(a).localeCompare(mail(b))),nPend=ids.filter(i=>USERS[i].aprovado===false).length,nAdm=ids.filter(i=>USERS[i].admin).length;
@@ -454,11 +526,11 @@ function admDraw(){if(!sess||!sess.admin||!$('t-us'))return;
 <td><button class="bt o sm" data-a="del" data-id="${i}"${eu||ult?` disabled title="${eu?'Você não pode excluir o próprio perfil.':'É o único administrador.'}"`:''}>Excluir perfil</button></td></tr>`}).join('')}
 function admClick(ev){const b=ev.target.closest('button[data-a]');if(!b||b.disabled||!sess||!sess.admin)return;
  const id=b.dataset.id,x=USERS[id],a=b.dataset.a;if(!x)return;
- const R=p=>db.ref(AC+'/usuarios/'+id+p),er=()=>msg('m-us','Não foi possível salvar. Verifique a conexão.','e'),good=t=>msg('m-us',t,'ok'),nm=x.email;
- if(a==='acesso'){const lib=x.aprovado===false;R('/aprovado').set(lib).then(()=>good(lib?`Acesso liberado para ${nm}. A pessoa já pode entrar.`:`Acesso de ${nm} bloqueado.`)).catch(er)}
- else if(a==='area'){const k=b.dataset.k,nv=!(x.areas&&x.areas[k]===true);R('/areas/'+k).set(nv).then(()=>good(`${nv?'Liberado':'Bloqueado'}: ${(AREAS.find(z=>z[0]===k)||[k,k])[1]} para ${nm}.`)).catch(er)}
- else if(a==='apagar'){const nv=x.podeApagar!==true;R('/podeApagar').set(nv).then(()=>good(`Apagar e alterar ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
- else if(a==='mensal'){const nv=!x.mensal;R('/mensal').set(nv).then(()=>good(`Monitoramento mensal ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
+ const W=o=>db.ref(AC+'/usuarios/'+id).set({...cl_(x),...o}),er=()=>msg('m-us','Não foi possível salvar. Verifique a conexão.','e'),good=t=>msg('m-us',t,'ok'),nm=x.email;
+ if(a==='acesso'){const lib=x.aprovado===false;W({aprovado:lib}).then(()=>good(lib?`Acesso liberado para ${nm}. A pessoa já pode entrar.`:`Acesso de ${nm} bloqueado.`)).catch(er)}
+ else if(a==='area'){const k=b.dataset.k,nv=!(x.areas&&x.areas[k]===true);W({areas:{...(x.areas||{}),[k]:nv}}).then(()=>good(`${nv?'Liberado':'Bloqueado'}: ${(AREAS.find(z=>z[0]===k)||[k,k])[1]} para ${nm}.`)).catch(er)}
+ else if(a==='apagar'){const nv=x.podeApagar!==true;W({podeApagar:nv}).then(()=>good(`Apagar e alterar ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
+ else if(a==='mensal'){const nv=!x.mensal;W({mensal:nv}).then(()=>good(`Monitoramento mensal ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
  else if(a==='del'&&confirm(`Excluir o perfil de ${nm}? A pessoa será desconectada e não poderá mais entrar.`)){const u={};u['usuarios/'+id]=null;u['presenca/'+id]=null;db.ref(AC).update(u).then(()=>good(`Perfil de ${nm} excluído.`)).catch(()=>msg('m-us','Não foi possível excluir. Verifique a conexão.','e'))}}
 async function admAdd(ev){ev.preventDefault();if(!sess||!sess.admin)return;const email=$('a-email').value.trim().toLowerCase(),pw=$('a-pw').value;
  if(!okMail(email))return msg('m-add','Digite um e-mail válido, como nome@empresa.com.','e');if(pw.length<8)return msg('m-add','A senha precisa ter pelo menos 8 caracteres.','e');
@@ -469,12 +541,69 @@ async function admAdd(ev){ev.preventDefault();if(!sess||!sess.admin)return;const
   if(!r.committed)msg('m-add','Este e-mail já tem perfil.','e');else{$('f-add').reset();msg('m-add','Perfil de '+email+' adicionado.','ok')}
  }catch(x){msg('m-add','Não foi possível adicionar. Verifique a conexão.','e')}
  if($('a-btn'))$('a-btn').disabled=false}
+
+
+// ---------- coletas: horário de corte, placa e motorista ----------
+const COL='contadorColetas',CNL=['Maria','Roberto','Ports 1','Ports 2','Gold','Flex Manhã','Flex Tarde'];let COLS={},CF={dia:'',c:'all',q:''},busyCo=false;
+// ---------- horário de corte (marcado em Pedidos, exibido na Apresentação) ----------
+const CUT='contadorCortes',CUTK=[['maria','Maria'],['roberto','Roberto'],['ports1','Ports 1'],['ports2','Ports 2']];let COR={},busyCut=false;
+const hmOk=v=>/^([01]\d|2[0-3]):[0-5]\d$/.test(v||'');
+function cutFill(){CUTK.forEach(([id])=>{const e=$('ct_'+id);if(e&&document.activeElement!==e)e.value=(COR[id]&&COR[id].h)||''});const i=$('ct_info');if(i){const u=CUTK.map(([id])=>COR[id]).filter(Boolean).sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0))[0];i.textContent=u?`Última alteração: ${u.por||''} em ${u.dataHora||''}`:'Nenhum horário de corte definido ainda.'}}
+async function cutSave(){if(busyCut)return;const up={};let n=0,bad='';
+ CUTK.forEach(([id,nm])=>{const e=$('ct_'+id);if(!e)return;const v=e.value.trim(),at=(COR[id]&&COR[id].h)||'';if(v===at)return;
+  if(v&&!hmOk(v)){bad=nm;return}n++;up[id]=v?{h:v,por:sess.email,dataHora:nowBR(),criadoEm:Date.now()}:null});
+ if(bad)return msg('ct_msg',`Horário inválido em ${bad}.`,'e');if(!n)return msg('ct_msg','Nenhuma alteração para salvar.','');
+ busyCut=true;msg('ct_msg','Enviando para a nuvem…','');
+ try{await db.ref(CUT).update(up);Object.keys(up).forEach(k=>{if(up[k])COR[k]=up[k];else delete COR[k]});cutFill();msg('ct_msg',`Horários de corte salvos (${n} alteração(ões)). Já aparecem na Apresentação.`,'ok')}
+ catch(x){msg('ct_msg','FALHA AO SALVAR. Tente novamente; os horários foram mantidos.','e')}busyCut=false}
+const plateOk=v=>/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(v);
+V.coleta=()=>{if(!CF.dia)CF.dia=hoje();
+ return `<div class="card"><h2>Coletas — janela de coleta e motorista</h2><p class="m">Registre, para cada Mercado Livre, o intervalo em que o motorista pode coletar (de tal horário até tal horário), o nome do motorista e a placa do veículo. O horário de corte é cadastrado na aba Pedidos.</p>
+<div class="g3"><div><label>Dia</label><input type="date" id="co_dia" value="${hoje()}"></div>
+<div><label>Mercado Livre</label><select id="co_c">${CNL.map(n=>`<option>${n}</option>`).join('')}</select></div>
+<div><label>Coleta a partir de</label><input type="time" id="co_h"></div>
+<div><label>Coleta até</label><input type="time" id="co_h2"></div>
+<div><label>Placa do veículo</label><input type="text" id="co_pl" maxlength="8" placeholder="ABC1D23" autocomplete="off" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,7)"></div>
+<div><label>Nome do motorista</label><input type="text" id="co_m" placeholder="Nome do motorista" autocomplete="off"></div>
+<div><label>Observação (opcional)</label><input type="text" id="co_o" autocomplete="off"></div></div>
+<div class="row"><button class="bt" onclick="coAdd()">${I.plus}Registrar coleta</button></div><div class="msg" id="co_msg" role="status"></div></div>
+<div class="card"><h3>Coletas registradas</h3><div class="row noprint" style="margin:0 0 10px;align-items:flex-end"><div><label>Dia</label><input type="date" value="${CF.dia}" onchange="CF.dia=this.value;coDraw()"></div>
+<div><label>Mercado Livre</label><select onchange="CF.c=this.value;coDraw()"><option value="all">Todos</option>${CNL.map(n=>`<option${CF.c===n?' selected':''}>${n}</option>`).join('')}</select></div>
+<div><label>Buscar</label><input type="text" placeholder="Motorista ou placa" value="${esc(CF.q)}" oninput="CF.q=this.value.trim().toLowerCase();coDraw()"></div>
+<button class="bt g" onclick="CF.dia='';CF.c='all';CF.q='';render()">Todos os dias</button></div><div id="co_l"></div></div>`};
+function coDraw(){const e=$('co_l');if(!e)return;
+ const L=Object.entries(COLS).filter(([k,x])=>x&&x.placa).map(([k,x])=>({...x,_k:k})).filter(x=>(!CF.dia||x.dia===CF.dia)&&(CF.c==='all'||x.canal===CF.c)&&(!CF.q||(x.motorista||'').toLowerCase().includes(CF.q)||x.placa.toLowerCase().includes(CF.q))).sort((a,b)=>(b.dia||'').localeCompare(a.dia||'')||(a.ini||a.corte||'').localeCompare(b.ini||b.corte||''));
+ e.innerHTML=`<p class="m">${L.length} coleta(s)${CF.dia?' em '+fd(CF.dia):' (todos os dias)'}</p><div class="tw"><table><thead><tr><th>Dia</th><th>Mercado Livre</th><th>Janela de coleta</th><th>Motorista</th><th>Placa</th><th>Obs.</th><th>Registrado por</th><th class="noprint"></th></tr></thead><tbody>${L.map(x=>`<tr><td>${fd(x.dia)}</td><td><b>${esc(x.canal)}</b></td><td><b>${x.ini?esc(x.ini)+' às '+esc(x.fim):esc(x.corte||'—')}</b></td><td>${cap(x.motorista)}</td><td>${esc(x.placa)}</td><td>${esc(x.obs||'—')}</td><td class="m">${esc(x.por||'')}<br>${esc(x.dataHora||'')}</td><td class="noprint"><button class="bt o sm" title="Excluir coleta" data-k="${esc(x._k)}" onclick="coDel(this.dataset.k)">${I.trash}</button></td></tr>`).join('')||'<tr><td colspan="8" class="m">Nenhuma coleta registrada</td></tr>'}</tbody></table></div>`}
+async function coAdd(){if(busyCo)return;const dia=$('co_dia').value,c=$('co_c').value,h=$('co_h').value,h2=$('co_h2').value,pl=$('co_pl').value.trim().toUpperCase(),m=$('co_m').value.trim().toLowerCase();
+ if(!dia)return msg('co_msg','Informe o dia.','e');if(!h)return msg('co_msg','Informe o horário inicial da coleta.','e');if(!h2)return msg('co_msg','Informe o horário final da coleta.','e');if(h2<=h)return msg('co_msg','O horário final deve ser depois do inicial.','e');
+ if(!plateOk(pl))return msg('co_msg','Placa inválida. Use 7 caracteres, como ABC1D23 ou ABC1234.','e');if(!m)return msg('co_msg','Informe o nome do motorista.','e');
+ if(Object.values(COLS).some(x=>x&&x.dia===dia&&x.canal===c&&x.ini===h&&x.fim===h2&&x.placa===pl))return msg('co_msg','Esta coleta já foi registrada.','e');
+ const r={dia,canal:c,ini:h,fim:h2,placa:pl,motorista:m,obs:$('co_o').value.trim(),dataHora:nowBR(),por:sess.email,criadoEm:Date.now()},id=novoId();busyCo=true;msg('co_msg','Enviando para a nuvem…','');
+ try{await db.ref(COL+'/'+id).set(r);COLS[id]=r;coDraw();msg('co_msg',`Coleta de ${c} registrada: ${h} às ${h2}, ${cap(m)} (${pl}).`,'ok');$('co_h').value=$('co_h2').value=$('co_pl').value=$('co_m').value=$('co_o').value=''}
+ catch(x){msg('co_msg','FALHA AO SALVAR. Tente novamente; os dados foram mantidos.','e')}busyCo=false}
+function coDel(k){if(!perm())return;const x=COLS[k];if(!x||!confirm(`Excluir a coleta de ${x.canal} (${x.ini?x.ini+' às '+x.fim:'corte '+x.corte}, ${x.motorista}, ${x.placa})?`))return;delete COLS[k];coDraw();db.ref(COL+'/'+k).remove().catch(()=>alert('Não foi possível excluir na nuvem. Atualize a página.'))}
+// ---------- presença ----------
+let PQ='',PF='all';
+V.presenca=()=>!(sess&&sess.admin)?'<div class="card"><h2>Presença</h2><p class="m">Somente administradores acessam esta área.</p></div>':`<div class="card"><h2>Presença no sistema</h2><p class="m">Veja em tempo real quem está conectado, de onde, desde quando e quantas sessões estão abertas. Atualiza sozinho.</p>
+<div class="row noprint" style="align-items:flex-end"><div><label>Situação</label><select onchange="PF=this.value;presDraw()"><option value="all">Todos</option><option value="on"${PF==='on'?' selected':''}>Conectados</option><option value="off"${PF==='off'?' selected':''}>Desconectados</option></select></div>
+<div><label>E-mail</label><input type="text" placeholder="Buscar e-mail" value="${esc(PQ)}" oninput="PQ=this.value.trim().toLowerCase();presDraw()"></div>
+<button class="bt g" onclick="PQ='';PF='all';render()">Limpar filtros</button></div></div>
+<div id="pr-k"></div>
+<div class="card"><h3>Perfis (<span id="pr-n">0</span>)</h3><div class="tw"><table><thead><tr><th>E-mail</th><th>Tipo</th><th>Situação</th><th>Onde</th><th>Conectado desde</th><th>Tempo conectado</th><th>Sessões</th></tr></thead><tbody id="pr-t"></tbody></table></div></div>`;
+function presDraw(){const t=$('pr-t');if(!t||!sess||!sess.admin)return;
+ const mail=id=>(USERS[id]&&USERS[id].email)||id.replace(/,/g,'.'),ids=[...new Set([...Object.keys(USERS).filter(i=>USERS[i]),...Object.keys(PRES).filter(i=>Object.keys(PRES[i]||{}).length)])],
+ info=id=>{const ss=Object.values(PRES[id]||{});return{on:ss.length>0,n:ss.length,onde:[...new Set(ss.map(x=>x.onde||'—'))].join(', '),desde:ss.length?Math.min(...ss.map(x=>+x.em||Date.now())):0}},
+ all=ids.map(id=>({id,m:mail(id),u:USERS[id]||{},...info(id)})),nOn=all.filter(x=>x.on).length,nS=all.reduce((a,x)=>a+x.n,0),
+ L=all.filter(x=>(PF==='all'||(PF==='on')===x.on)&&(!PQ||x.m.toLowerCase().includes(PQ))).sort((a,b)=>(b.on-a.on)||(a.on&&b.on?a.desde-b.desde:0)||a.m.localeCompare(b.m));
+ $('pr-k').innerHTML=cb(kp('Conectados agora',nOn,'de '+all.length+' perfil(is)')+kp('Desconectados',all.length-nOn,'')+kp('Sessões abertas',nS,'aparelhos/abas'));
+ $('pr-n').textContent=L.length;
+ t.innerHTML=L.length?L.map(x=>`<tr><td>${esc(x.m)}${x.id===sess.uid?' <span class="m">(você)</span>':''}</td><td>${x.u.admin?'Administrador':'Usuário'}</td><td><span class="bd${x.on?' ok':''}">${x.on?'Conectado':'Desconectado'}</span></td><td>${x.on?esc(x.onde):'—'}</td><td>${x.on?new Date(x.desde).toLocaleString('pt-BR'):'—'}</td><td>${x.on?fdur(Date.now()-x.desde):'—'}</td><td>${x.on?x.n:'—'}</td></tr>`).join(''):'<tr><td colspan="7" class="m">Nenhum perfil encontrado</td></tr>'}
 // ---------- backup ----------
 const csvOf=rows=>{const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';return '\ufeffData/Hora;Tipo;Pedido;Pessoa/Campo;Observação;Situação\r\n'+rows.map(x=>[x.dataHora,TP[x.t],x.pedido,x.t==='B'?rot(x):x.pessoa,x.obs||'',sit(x)].map(q).join(';')).join('\r\n')};
 const bkSupport=typeof window.showDirectoryPicker==='function',BK={h:null,ok:false,busy:false,init:false,msg:'',auto:(()=>{try{return localStorage.getItem('bkAuto')!=='0'}catch(e){return true}})()};
 const idb=(m,v)=>new Promise((res,rej)=>{const o=indexedDB.open('liber-bk',1);o.onupgradeneeded=()=>o.result.createObjectStore('k');o.onerror=()=>rej(o.error);o.onsuccess=()=>{const s=o.result.transaction('k',m==='get'?'readonly':'readwrite').objectStore('k'),q=m==='get'?s.get('dir'):s.put(v,'dir');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)}});
 const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes())};
-const bkData=()=>({sistema:'liber Automotive - Gestão de Pedidos',geradoEm:new Date().toISOString(),geradoPor:sess?sess.email:'',registrosMensais:ARQ,historico:S.historico,pessoas:S.pessoas,pedidosBipados:BIP,separacao:SEP});
+const bkData=()=>({sistema:'liber Automotive - Gestão de Pedidos',geradoEm:new Date().toISOString(),geradoPor:sess?sess.email:'',registrosMensais:ARQ,historico:S.historico,pessoas:S.pessoas,pedidosBipados:BIP,separacao:SEP,coletas:COLS,cortes:COR});
 async function bkInit(){if(BK.init||!bkSupport)return;BK.init=true;try{const h=await idb('get');if(h){BK.h=h;BK.ok=(await h.queryPermission({mode:'readwrite'}))==='granted'}}catch(e){}bkUI();bkAuto()}
 async function bkPick(){try{const h=await window.showDirectoryPicker({mode:'readwrite',id:'liber-backup'});BK.h=h;BK.ok=true;BK.msg='';await idb('set',h).catch(()=>{});bkUI();await bkRun(true)}catch(e){if(!e||e.name!=='AbortError'){BK.msg='Não foi possível acessar a pasta escolhida.';bkUI()}}}
 async function bkAllow(){try{BK.ok=(await BK.h.requestPermission({mode:'readwrite'}))==='granted'}catch(e){BK.ok=false}bkUI();if(BK.ok)bkRun(true)}
@@ -518,11 +647,13 @@ V.apresentacao=()=>{
  return `<div class="pres">
 <div class="ptop"><div><h1>Andamento da operação</h1><div class="sub">liber Automotive · ${new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>
 <div class="pright"><div class="clk" id="pclk">${new Date().toLocaleTimeString('pt-BR')}</div><div class="pbtn"><button class="bt g sm" onclick="$('bt').click()">${I.dark||''}Tema</button><button class="bt o sm" onclick="tvToggle()">${I.full}${tv?'Sair do modo TV':'Modo TV (tela cheia)'}</button></div></div></div>
-<div class="pk"><div class="pt"><small>Total de pedidos bipados</small><b>${v.length}</b><span>Flex manhã ${fq(v,'manha')} · Flex tarde ${fq(v,'tarde')}${fq(v,'')?' · Flex s/ turno '+fq(v,''):''} · Gold ${v.filter(b=>b.campo==='gold').length}</span></div>
+<div class="pk"><div class="pt"><small>Total de pedidos bipados</small><b>${v.length}</b><span>Flex manhã ${fq(v,'manha')} · Flex tarde ${fq(v,'tarde')}${fq(v,'')?' · Flex s/ turno '+fq(v,''):''} · Gold ${v.filter(b=>b.campo==='gold').length}${v.filter(b=>b.anterior).length?' · Dia anterior '+v.filter(b=>b.anterior).length:''}</span></div>
 <div class="pt ok"><small>Embalados hoje</small><b>${embH.length}</b><span>${tesH.length} testados hoje</span></div>
 <div class="pt${pend.length?' warn':' ok'}"><small>Pendentes (total)</small><b>${pend.length}</b><span>${pendOld.length?pendOld.length+' de dias anteriores':'nenhum de dias anteriores'}</span></div>
 <div class="pt mut"><small>Cancelados hoje</small><b>${canc}</b><span>fora da contagem</span></div></div>
-<div class="pp"><h3>Andamento dos pedidos</h3><div class="stg">${st.map(([n,d],i)=>`<div class="sg"><small>${n}</small><b>${d}<em> de ${tot}</em></b><div class="pb"><i class="${i?'':'y'}" style="width:${i?pc(d,tot):tot?100:0}%"></i></div><span>${i?pc(d,tot)+'% concluído · faltam '+(tot-d):'total de pedidos bipados'}</span></div>`).join('')}</div></div>
+${(()=>{const nm=new Date(),mn=nm.getHours()*60+nm.getMinutes(),L=CUTK.map(([id,n])=>{const h=COR[id]&&COR[id].h;if(!hmOk(h))return null;const d=(+h.slice(0,2))*60+(+h.slice(3))-mn;return{n,h,d}}).filter(Boolean).sort((a,b)=>a.h.localeCompare(b.h)),nx=L.find(x=>x.d>=0),fm=d=>d>=60?Math.floor(d/60)+'h'+(d%60?String(d%60).padStart(2,'0'):''):d+' min';
+ return `<div class=\"pp\"><h3>Horário de corte</h3>${L.length?`<div class=\"cut\">${L.map(x=>`<div class=\"${x.d<0?'past':x===nx?'next':''}\"><small>${esc(x.n)}</small><b>${x.h}</b><span>${x.d<0?'encerrado':x.d===0?'agora':'faltam '+fm(x.d)}</span></div>`).join('')}</div>`:'<p class=\"m\">Nenhum horário de corte definido. Cadastre na aba Pedidos.</p>'}</div>`})()}
+<div class=\"pp\"><h3>Andamento dos pedidos</h3><div class="stg">${st.map(([n,d],i)=>`<div class="sg"><small>${n}</small><b>${d}<em> de ${tot}</em></b><div class="pb"><i class="${i?'':'y'}" style="width:${i?pc(d,tot):tot?100:0}%"></i></div><span>${i?pc(d,tot)+'% concluído · faltam '+(tot-d):'total de pedidos bipados'}</span></div>`).join('')}</div></div>
 <div class="pg2"><div class="pp"><h3>Produção por hora <span class="lgd"><i class="y"></i>Impressos <i class="r"></i>Embalados</span></h3><div class="hb">${Array.from({length:up-lo+1},(_,k)=>{const h=lo+k;return `<div class="${h===nowH?'now':''}"><span>${he[h]||''}</span><div class="pr"><i class="y" style="height:${hi[h]/hm*100}%"></i><i class="r" style="height:${he[h]/hm*100}%"></i></div><span>${String(h).padStart(2,'0')}h</span></div>`}).join('')}</div></div>
 <div class="pp"><h3>Pedidos por campo (hoje)</h3><div class="rk">${camp.map(([n,c])=>`<div class="rw"><span>${n}</span><div class="br"><i style="width:${c/cm*100}%"></i></div><b>${c}</b></div>`).join('')}</div><p class="m">Flex já está incluso nos campos.</p></div></div>
 <div class="pg3"><div class="pp"><h3>Quem mais embalou hoje</h3><div class="rk">${rows(rE,Math.max(1,...rE.map(x=>x[1])))}</div></div>
@@ -541,7 +672,7 @@ const reg=(n,obs)=>`<p>Registra quem executou a etapa <b>${n}</b> em cada pedido
 
 const MAN=[
 ['geral','Visão geral e regras',`<p>O sistema acompanha cada pedido do impresso até a embalagem, em tempo real, para todos os usuários.</p><h4>Fluxo</h4><ol><li><b>Pedidos</b>: bipar o pedido impresso (entrada do dia).</li><li><b>Teste&amp;Conferência</b>.</li><li><b>Bipagem</b>.</li><li><b>Embalagens</b>: só aqui o pedido deixa de ser pendente.</li></ol><h4>Tela</h4><ul><li><b>Pendentes</b> (faixa no topo) = impressos sem cancelados − embalados. O anel mostra o % embalado; as etiquetas mostram Flex por turno, Gold e Cancelados.</li><li>Cabeçalho: <b>Nuvem conectada</b> (verde) indica que está salvando. Se mostrar <b>Sem conexão</b> ou <b>Erro ao salvar</b>, confira a internet antes de continuar.</li><li>Botão <b>☰</b> recolhe o menu lateral; botão de tema alterna claro/escuro; <b>Sair</b> encerra a sessão.</li><li>Itens do menu esmaecidos = área ainda não liberada para sua conta.</li></ul><div class="tip">Mensagens comuns: "não está na lista de Pedidos" (bipe antes em Pedidos), "já foi registrado" (não repita), "CANCELADO" (não processar), "sem liberação para apagar" (peça ao administrador).</div>`],
-['pedidos','Pedidos (entrada do dia)',`<p>Registra cada pedido impresso e o canal de origem.</p><ol><li>Clique no campo do canal: <b>Maria, Roberto, Ports 1, Ports 2</b> ou <b>Gold</b>.</li><li>Bipe os 5 dígitos. O registro é automático e o contador "hoje" sobe.</li><li><b>Flex</b> (Maria, Roberto, Ports 1 e 2): marque <b>Flex</b> e escolha <b>Manhã</b> ou <b>Tarde</b> <u>antes</u> de bipar.</li></ol><ul><li><b>Histórico por dia</b>: totais por canal, cancelados, embalados e pendentes. A lixeira exclui o dia inteiro (permissão Apagar/alterar).</li><li><b>Pedidos impressos (pendentes)</b>: mostra o horário de cada etapa (Teste, Bipagem, Embalagem) e "— não" quando falta.</li><li><b>Cancelar</b>: marca como CANCELADO sem apagar; sai dos pendentes (precisa de permissão).</li><li><b>Copiar pedidos não embalados</b>: copia a lista para colar em mensagem.</li></ul><div class="tip">Pedido repetido é recusado e informa onde e quando já foi registrado. Flex e Gold entram no total.</div>`],
+['pedidos','Pedidos (entrada do dia)',`<p>Registra cada pedido impresso e o canal de origem.</p><ol><li>Clique no campo do canal: <b>Maria, Roberto, Ports 1, Ports 2</b> ou <b>Gold</b>.</li><li>Bipe os 5 dígitos. O registro é automático e o contador "hoje" sobe.</li><li><b>Flex</b> (Maria, Roberto, Ports 1 e 2): marque <b>Flex</b> e escolha <b>Manhã</b> ou <b>Tarde</b> <u>antes</u> de bipar.</li></ol><ul><li><b>Histórico por dia</b>: totais por canal, cancelados, embalados e pendentes. A lixeira exclui o dia inteiro (permissão Apagar/alterar).</li><li><b>Pedidos impressos (pendentes)</b>: mostra o horário de cada etapa (Teste, Bipagem, Embalagem) e "— não" quando falta.</li><li><b>Pedido do dia anterior</b>: marque antes de bipar quando o pedido for de ontem. Ele entra no total, mas aparece em coluna separada (<b>Dia ant.</b>) no Histórico por dia e é identificado na lista de pendentes.</li><li><b>Horário de corte</b>: defina o limite de cada Mercado Livre e clique em <b>Salvar horários de corte</b>. Ele aparece na Apresentação e vale todos os dias até ser alterado.</li><li><b>Cancelar</b>: marca como CANCELADO sem apagar; sai dos pendentes (precisa de permissão).</li><li><b>Copiar pedidos não embalados</b>: copia a lista para colar em mensagem.</li></ul><div class="tip">Pedido repetido é recusado e informa onde e quando já foi registrado. Flex e Gold entram no total.</div>`],
 ['teste','Teste&amp;Conferência',reg('Teste&amp;Conferência',true)],
 ['bipagem','Bipagem',reg('Bipagem',true)],
 ['embalagens','Embalagens',reg('Embalagem',false)],
@@ -550,7 +681,8 @@ const MAN=[
 ['dprod','Dashboard Produção',`<p>Analisa a etapa <b>Embalagens</b> (o Dashboard Teste funciona igual, para Teste&amp;Conferência).</p><ul><li><b>Filtros</b>: Dia, Hora de/até e <b>Pessoas</b> (escolha uma ou mais; os totais são somados). <b>Limpar filtros</b> volta ao geral.</li><li>Clique em uma <b>barra de hora</b> ou numa <b>pessoa da rosca</b> para filtrar; clique de novo para tirar.</li><li>Indicadores: total, tempo médio entre pedidos (pausas acima de 30 min são ignoradas), mais rápida e mais demorada.</li><li><b>Desempenho por pessoa</b>: pedidos, tempos e avaliação; <b>Ver feedback</b> mostra pontos fortes e de atenção.</li></ul><div class="tip"><b>Imprimir relatório</b> gera versão limpa com filtros, data e usuário (escolha "Salvar como PDF" para arquivo).</div>`],
 ['dteste','Dashboard Teste',`<p>Mesmo uso do Dashboard Produção, aplicado ao <b>Teste&amp;Conferência</b>. Além dos indicadores, mostra o total de pedidos com <b>observação</b> e a seção <b>Observações do teste</b>, com os comentários registrados.</p>`],
 ['mensal','Monitoramento mensal',`<p>Arquivo permanente de tudo que passou pelo sistema, mesmo o que foi excluído depois.</p><ol><li>Escolha o <b>Mês</b> e, se quiser, o <b>Dia</b>.</li><li>Veja indicadores (bipados, cancelados, Teste, Embalagens, excluídos), gráficos e tabelas por dia e por pessoa.</li><li>Em <b>Registros</b>, filtre por tipo, busque pelo número do pedido e use <b>Baixar (.csv)</b> para abrir no Excel.</li></ol><ul><li>Coluna <b>Situação</b>: Ativo, Cancelado ou Excluído do sistema. Só administradores excluem registros.</li><li><b>Backup</b>: <b>Escolher pasta</b> (Chrome/Edge no computador) cria a pasta <b>liber Backups</b> com um arquivo completo e uma pasta por mês. Há <b>Fazer backup agora</b>, backup automático 1x por dia com o sistema aberto e <b>Baixar backup (.json)</b>.</li></ul>`],
-['apresentacao','Apresentação (tela grande)',`<p>Painel para TV, atualizado sozinho.</p><ul><li><b>Cartões</b>: total de pedidos bipados (todos os ativos, de qualquer dia), embalados e testados hoje, pendentes (e quantos são de dias anteriores) e cancelados.</li><li><b>Andamento</b> de Impressos, Teste, Bipagem e Embalados; produção por hora; pedidos por campo; ranking de quem mais embalou e testou.</li><li><b>Pontos de atenção</b>: pendente mais antigo, Flex pendentes por turno, ritmo e estimativa para zerar pendentes.</li></ul><p>Clique em <b>Modo TV (tela cheia)</b> para esconder os menus; saia com o mesmo botão ou Esc.</p>`],
+['apresentacao','Apresentação (tela grande)',`<p>Painel para TV, atualizado sozinho.</p><ul><li><b>Cartões</b>: total de pedidos bipados (todos os ativos, de qualquer dia), embalados e testados hoje, pendentes (e quantos são de dias anteriores) e cancelados.</li><li><b>Horário de corte</b> de cada Mercado Livre, com o tempo que falta para encerrar (o próximo corte fica em destaque).</li><li><b>Andamento</b> de Impressos, Teste, Bipagem e Embalados; produção por hora; pedidos por campo; ranking de quem mais embalou e testou.</li><li><b>Pontos de atenção</b>: pendente mais antigo, Flex pendentes por turno, ritmo e estimativa para zerar pendentes.</li></ul><p>Clique em <b>Modo TV (tela cheia)</b> para esconder os menus; saia com o mesmo botão ou Esc.</p>`],
+['coleta','Coletas (janela e motorista)',`<p>Registro do intervalo em que cada Mercado Livre pode ser coletado e de quem vai coletar.</p><ol><li>Escolha o <b>Dia</b>, o <b>Mercado Livre</b> e a janela: <b>Coleta a partir de</b> e <b>Coleta até</b>.</li><li>Informe a <b>Placa do veículo</b> e o <b>Nome do motorista</b> (observação é opcional).</li><li>Clique em <b>Registrar coleta</b>. A mensagem verde confirma.</li></ol><ul><li>A lista abaixo mostra o dia escolhido, ordenada pelo horário inicial da coleta; filtre por Mercado Livre ou busque por motorista/placa.</li><li>A lixeira exclui a coleta (permissão Apagar/alterar).</li></ul><div class="tip">Esta área só aparece para contas liberadas pelo administrador.</div>`],
 ['apagar','Permissão de apagar e alterar',`<p>Sua conta pode: cancelar pedidos, excluir dias em Pedidos, remover pessoas, apagar registros do histórico e limpar históricos. Essas ações não têm volta no histórico da etapa (o Monitoramento mensal mantém o rastro). Confirme sempre antes de apagar.</p>`],
 ['admin','Administração de acessos',`<ul><li><b>Conectados agora</b>: quem está online, onde e desde quando.</li><li><b>Adicionar perfil</b>: e-mail, senha (mín. 8) e marcações de Monitoramento mensal, áreas, "pode apagar e alterar" e "Administrador".</li><li><b>Perfis</b>: contas novas aparecem no topo "aguardando liberação"; clique em <b>Liberar acesso</b>.</li><li>Cada <b>chip</b> liga/desliga uma área (verde = liberado). <b>Apagar/alterar</b> libera ações de exclusão e cancelamento.</li><li><b>Excluir perfil</b> desconecta a pessoa. Não é possível excluir a si mesmo nem o único administrador.</li></ul><div class="tip">Libere só as áreas da função de cada pessoa e dê Apagar/alterar a poucos usuários. As instruções que cada usuário vê seguem as áreas liberadas aqui.</div>`]
 ];
@@ -559,10 +691,12 @@ V.ajuda=()=>{const L=MAN.filter(m=>vis(m[0])),adm=!!(sess&&sess.admin);
  return `<div class="card man"><h2>Instruções${adm?' — manual completo':''}</h2><p class="m">${adm?'Como administrador, você vê o manual de todas as áreas.':'Aqui aparecem as instruções das áreas liberadas na sua conta. Precisa de outra área? Peça ao administrador.'}</p><div class="chips noprint">${L.map(m=>`<button type="button" class="chip" onclick="document.getElementById('man_${m[0]}').scrollIntoView({behavior:'smooth'})">${m[1]}</button>`).join('')}</div><div class="row noprint"><button class="bt o" onclick="window.print()">${I.print}Imprimir instruções</button></div></div>${L.map(m=>`<div class="card man" id="man_${m[0]}"><h3>${m[1]}</h3>${m[2]}</div>`).join('')}`};
 })();
 // ---------- nuvem ----------
-db.ref('.info/connected').on('value',s=>{$('cl').innerHTML=`<i class="dot ${s.val()?'on':'off'}"></i>${s.val()?'Nuvem conectada':'Sem conexão'}`});
+db.ref('.info/connected').on('value',s=>{$('cl').innerHTML=!USE.length?'<i class="dot"></i>Aguardando login':`<i class="dot ${s.val()?'on':'off'}"></i>${s.val()?'Nuvem conectada':'Conectando…'}`});
 db.ref('contadorPedidos').on('value',s=>{const d=s.val()||{};S.pessoas=d.pessoas||{};BASEH=d.historico||{};['teste','bipagem','embalagens'].forEach(g=>{S.pessoas[g]=S.pessoas[g]?arr(S.pessoas[g]):JSON.parse(JSON.stringify(PAD[g]))});rd.h=1;syncHistory()});
 db.ref(EXTRA_PATH).on('value',s=>{EXTRA=s.val()||{};rd.extra=1;syncHistory()});
 db.ref(BP).on('value',s=>{BIP=s.val()||{};rd.b=1;refresh();arqSync()});
+db.ref(COL).on('value',s=>{COLS=s.val()||{};if(tab==='coleta')coDraw()});
+db.ref(CUT).on('value',s=>{COR=s.val()||{};if(tab==='pedidos')cutFill();else if(tab==='apresentacao')refresh()});
 db.ref(SP).on('value',s=>{SEP=s.val()||{};if(tab==='separacao'&&!document.activeElement.matches('input'))render();else pendDraw()});
 db.ref(AP).on('value',s=>{ARQ=s.val()||{};rd.a=1;if(tab==='mensal')refresh();arqSync()});
 // ---------- login ----------
@@ -573,17 +707,28 @@ const same=(a,b)=>{if(a.length!==b.length)return false;let r=0;for(let i=0;i<a.l
 let rU=null,rC=null,rP=null;const lm=(t,k)=>{const e=$('lm');e.textContent=t||'';e.className='msg '+(k||'')};
 let SETUP=false;
 const ltab=u=>{if(SETUP)return;$('fi').hidden=u;$('fu').hidden=!u;$('lti').classList.toggle('on',!u);$('ltu').classList.toggle('on',u);lm('')};
-function checkSetup(){db.ref(AC+'/usuarios').once('value').then(s=>{const us=s.val()||{};if(Object.values(us).some(u=>u&&u.admin))return;SETUP=true;$('fi').hidden=true;$('fu').hidden=true;$('fs').hidden=false;const lt=document.querySelector('.lt');if(lt)lt.style.display='none';lm('Nenhum administrador existe ainda. Crie o primeiro para liberar o painel e gerenciar os acessos.','ok')}).catch(()=>{})}
+function checkSetup(){SB.from('kv').select('k').like('k',AC+'/usuarios/%').eq('v->>admin','true').limit(1).then(r=>{if(r.error||(r.data&&r.data.length))return;SETUP=true;$('fi').hidden=true;$('fu').hidden=true;$('fs').hidden=false;const lt=document.querySelector('.lt');if(lt)lt.style.display='none';lm('Nenhum administrador existe ainda. Crie o primeiro para liberar o painel e gerenciar os acessos.','ok')}).catch(()=>{})}
 $('fs').onsubmit=async ev=>{ev.preventDefault();const e=$('se').value.trim().toLowerCase(),pw=$('sp').value;
  if(!okMail(e))return lm('Digite um e-mail válido, como nome@empresa.com.','e');if(pw.length<8)return lm('A senha precisa ter pelo menos 8 caracteres.','e');if(pw!==$('sp2').value)return lm('As senhas não são iguais.','e');
  $('bs').disabled=true;try{const salt=crypto.getRandomValues(new Uint8Array(16)),rec={email:e,salt:b64(salt),hash:await hash(pw,salt),mensal:true,admin:true,aprovado:true,areas:{teste:true,bipagem:true,embalagens:true,pedidos:true,separacao:true},podeApagar:true,criado:new Date().toISOString(),criadoPor:'primeiro acesso'};
  const r=await db.ref(AC+'/usuarios/'+uidOf(e)).transaction(c=>c?undefined:rec);if(!r.committed)lm('Este e-mail já tem perfil.','e');else{try{sessionStorage.setItem('mudLogin',uidOf(e))}catch(x){}$('fs').reset();lm('');start(uidOf(e))}}catch(x){lm('Não foi possível criar. Verifique a conexão.','e')}$('bs').disabled=false};
 function hdr(){$('ov').hidden=!!sess;$('bo').hidden=!sess;$('ue').textContent=sess?sess.email:''}
-function stop(){admOff();clearInterval(HBI);if(rU)rU.off();if(rC)rC.off();if(rP)rP.remove();rU=rC=rP=null}
+function stop(){admOff();clearInterval(HBI);presStop();if(rU)rU.off();if(rC)rC.off();rU=rC=rP=null;rd.h=rd.b=rd.a=rd.extra=0;sbUse([])}
+/* O que cada conta baixa e escuta em tempo real */
+function grupos(){const g=['contadorPedidos',EXTRA_PATH,BP,SP,CUT];g.push(sess.admin?AC:AC+'/usuarios/'+sess.uid);if(sess.admin||sess.mensal)g.push(AP);if(sess.admin||sess.areas.coleta===true)g.push(COL);return g}
+/* ---------- presença (quem está online) — Realtime Presence: não grava nada no banco ---------- */
+const EM0=Date.now();let PCH=null,PSUB=false,PTRK='';
+function presStart(){if(PCH||!sess)return;PSUB=false;const ch=SB.channel('presenca-online',{config:{presence:{key:sess.uid}}});PCH=ch;
+ ch.on('presence',{event:'sync'},()=>{if(PCH!==ch)return;const st=ch.presenceState(),o={};Object.keys(st).forEach(id=>{o[id]={};(st[id]||[]).forEach((m,i)=>{o[id][m.sid||('s'+i)]={em:m.em,onde:m.onde,arq:!!m.arq}})});PRES=o;if((tab==='admin'||tab==='presenca')&&sess&&sess.admin){admDraw();presDraw()}arqSync()})
+ .subscribe(st=>{if(PCH!==ch)return;PSUB=st==='SUBSCRIBED';if(PSUB)presTrack(true)})}
+function presTrack(force){if(!PCH||!PSUB||!sess)return;const arq=!!(sess.admin||sess.mensal),k=String(arq);if(!force&&k===PTRK)return;PTRK=k;PCH.track({sid:SID,em:EM0,onde:'Sistema unificado',arq}).catch(()=>{})}
+function presStop(){if(PCH){const c=PCH;PCH=null;try{c.untrack();SB.removeChannel(c)}catch(e){}}PSUB=false;PTRK='';PRES={}}
+/* Só UM aparelho grava o arquivo mensal: o conectado há mais tempo entre admin/monitoramento.
+   Antes, todos os aparelhos gravavam a mesma coisa ao mesmo tempo. */
+function souLider(){const c=[];Object.values(PRES).forEach(o=>Object.entries(o).forEach(([s,m])=>{if(m.arq)c.push({s,em:+m.em||0})}));if(!c.some(x=>x.s===SID))return false;c.sort((a,b)=>a.em-b.em||(a.s<b.s?-1:a.s>b.s?1:0));return c[0].s===SID}
 function out(t){stop();try{localStorage.removeItem('mudLogin');sessionStorage.removeItem('mudLogin')}catch(e){}sess=null;hdr();render();lm(t,t?'e':'')}
-function start(uid){stop();rU=db.ref(AC+'/usuarios/'+uid);rU.on('value',s=>{const u=s.val();if(!u||u.aprovado===false)return out(u?'Seu acesso foi bloqueado pelo administrador.':'Seu acesso foi removido pelo administrador.');
- sess={uid,email:u.email,admin:!!u.admin,areas:u.areas||{},mensal:!!u.mensal,pode:u.podeApagar===true};hdr();admWatch();if(sess.admin||sess.mensal)bkInit();if(!ok(tab))tab='dprod';render();arqSync()});
- rP=db.ref(AC+'/presenca/'+uid+'/'+SID);const hb=()=>{if(rP)rP.set({em:Date.now(),onde:'Sistema unificado'})};clearInterval(HBI);hb();HBI=setInterval(hb,25000)}
+function start(uid){stop();sbUse([AC+'/usuarios/'+uid]);rU=db.ref(AC+'/usuarios/'+uid);rU.on('value',s=>{const u=s.val();if(!u||u.aprovado===false)return out(u?'Seu acesso foi bloqueado pelo administrador.':'Seu acesso foi removido pelo administrador.');
+ sess={uid,email:u.email,admin:!!u.admin,areas:u.areas||{},mensal:!!u.mensal,pode:u.podeApagar===true};hdr();sbUse(grupos());presStart();presTrack();admWatch();if(sess.admin||sess.mensal)bkInit();if(!ok(tab))tab='dprod';render();arqSync()});}
 $('lti').onclick=()=>ltab(false);$('ltu').onclick=()=>ltab(true);$('bo').onclick=()=>out('Você saiu da conta.');
 $('bt').onclick=()=>{const d=document.documentElement,n=(d.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'))==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('tema',n)}catch(e){}};
 try{const t=localStorage.getItem('tema');if(t)document.documentElement.dataset.theme=t}catch(e){}
@@ -600,8 +745,8 @@ $('fi').onsubmit=async ev=>{ev.preventDefault();const e=$('ie').value.trim().toL
 $('bsb').onclick=()=>{const c=document.body.classList.toggle('sbc');try{localStorage.setItem('sbc',c?'1':'0')}catch(e){}};
 try{if(localStorage.getItem('sbc')==='1')document.body.classList.add('sbc')}catch(e){}
 setInterval(()=>{const c=$('pclk');if(c)c.textContent=new Date().toLocaleTimeString('pt-BR')},1000);
-setInterval(()=>{if(sess&&tab==='apresentacao'&&rd.h&&rd.b)refresh()},60000);
-sbStart();hdr();render();checkSetup();
+setInterval(()=>{if(sess&&tab==='apresentacao'&&rd.h&&rd.b)refresh();if(sess&&tab==='presenca')presDraw()},60000);
+hdr();render();checkSetup();
 let sid=null;try{sid=sessionStorage.getItem('mudLogin')||localStorage.getItem('mudLogin')}catch(e){}
 if(sid)db.ref(AC+'/usuarios/'+sid).once('value').then(s=>{const u=s.val();if(u&&u.aprovado!==false)start(sid)}).catch(()=>{});
 </script></body></html>
