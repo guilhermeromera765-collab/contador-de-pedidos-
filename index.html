@@ -165,8 +165,8 @@ const I={teste:svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2
  chev:svg('<path d="M6 9l6 6 6-6"/>')};
 /* ===== Banco de dados: Supabase (dados compartilhados entre os arquivos) =====
    Requer a tabela "kv" criada no Supabase (ver CONFIGURAR_SUPABASE.sql). */
-const SB_URL="https://afucdsbabjunmcerqvqh.supabase.co",SB_KEY="sb_publishable_qA2rLSdWdOx99OiyN5DTzA_9BlljKkP";
-const SB=supabase.createClient(SB_URL,SB_KEY);
+const SB_URL="https://vkpzydknueefeeynhnlv.supabase.co",SB_KEY="sb_publishable_StD69Um-JMyJa8JXf6_-cw_0zCYG3jg";
+const SB=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 let KV={},SB_ON=false,LIS=[],HBI=null,SB_CONN=null,SBC=null,LOST=false;
 /* ===== Economia de tráfego (egress) — versão otimizada =====
    - Nada da tabela é baixado antes do login (só o cadastro da própria pessoa, na hora de entrar).
@@ -186,7 +186,9 @@ function sbSnap(p,src){src=src||KV;const P=p+"/",ks=Object.keys(src).filter(k=>k
   for(let i=0;i<ps.length-1;i++){if(x[ps[i]]===null||typeof x[ps[i]]!=="object")x[ps[i]]={};x=x[ps[i]]}
   x[ps[ps.length-1]]=v});
  return{val:()=>o}}
-function sbDisp(){LIS.forEach(l=>{if(!isReady(l.p))return;try{const s=sbSnap(l.p),j=JSON.stringify(s.val());if(l.j===j)return;l.j=j;l.cb(s)}catch(e){}})}
+/* Agrupa notificações do mesmo ciclo para evitar renderizar a tela várias vezes por lote Realtime. */
+let SB_RENDER_PENDING=false;
+function sbDisp(){if(SB_RENDER_PENDING)return;SB_RENDER_PENDING=true;queueMicrotask(()=>{SB_RENDER_PENDING=false;LIS.forEach(l=>{if(!isReady(l.p))return;try{const s=sbSnap(l.p),j=JSON.stringify(s.val());if(l.j===j)return;l.j=j;l.cb(s)}catch(e){console.warn('Atualização de tela:',e)}})})}
 function sbStat(){if(SB_CONN)SB_CONN({val:()=>SB_ON})}
 function sbFail(e){console.warn("Supabase:",e);const c=document.getElementById("cl");if(c)c.innerHTML='<i class="dot off"></i>Erro ao salvar na nuvem';return Promise.reject(e)}
 /* Busca só um caminho (registro exato + filhos); "since" = só o que mudou depois dessa data */
@@ -648,7 +650,7 @@ const AREAS=[['teste','Teste&amp;Conferência'],['bipagem','Bipagem'],['embalage
 let USERS={},PRES={},rUs=null,rPs=null;
 V.admin=()=>!(sess&&sess.admin)?'<div class="card"><h2>Administração de acessos</h2><p class="m">Somente administradores acessam esta área.</p></div>':`<div class="card"><h2>Administração de acessos</h2><p class="m">Veja quem está conectado, adicione ou exclua perfis e defina o que cada conta pode abrir (Teste, Bipagem, Embalagens, Pedidos, Separação, Monitoramento mensal) e se pode apagar ou alterar informações.</p></div>
 <div class="card"><h3>Conectados agora (<span id="n-on">0</span>)</h3><div class="tw"><table><thead><tr><th>E-mail</th><th>Onde</th><th>Conectado desde</th><th>Sessões</th></tr></thead><tbody id="t-on"></tbody></table></div></div>
-<div class="card"><h3>Adicionar perfil</h3><form id="f-add" onsubmit="admAdd(event)" novalidate><div class="g3"><div><label>E-mail</label><input type="text" id="a-email" autocomplete="off"></div><div><label>Senha (mín. 8 caracteres)</label><input type="password" id="a-pw" autocomplete="new-password"></div></div>
+<div class="card"><h3>Novos perfis</h3><p class="m">Cada colaborador deve usar “Criar conta” na tela de acesso. Depois, aprove o cadastro e selecione as áreas abaixo. A criação de senhas por administrador foi desativada por segurança.</p><form id="f-add" onsubmit="admAdd(event)" novalidate hidden><div class="g3"><div><label>E-mail</label><input type="text" id="a-email" autocomplete="off"></div><div><label>Senha (mín. 8 caracteres)</label><input type="password" id="a-pw" autocomplete="new-password"></div></div>
 <label class="ck"><input type="checkbox" id="a-mensal"> Liberar Monitoramento mensal</label>
 <div class="m" style="margin:12px 0 2px">Opções do Contador de Pedidos que a conta poderá abrir:</div>
 ${AREAS.map(([k,l])=>`<label class="ck"><input type="checkbox" data-area="${k}"> ${l==='Teste'?'Teste&amp;Conferência':l==='Coletas'?'Coletas (janela e motorista)':l}</label>`).join('')}
@@ -656,11 +658,10 @@ ${AREAS.map(([k,l])=>`<label class="ck"><input type="checkbox" data-area="${k}">
 <label class="ck"><input type="checkbox" id="a-admin"> Administrador (acesso total e a esta área)</label>
 <div class="row"><button class="bt" id="a-btn">Adicionar perfil</button></div><div class="msg" id="m-add" role="status"></div></form></div>
 <div class="card"><h3>Perfis (<span id="n-us">0</span>) <span class="bd bad" id="n-pend" hidden></span></h3><div class="tw"><table><thead><tr><th>E-mail</th><th>Tipo</th><th>Acesso</th><th>Monitoramento mensal</th><th>Opções e ações liberadas</th><th>Situação</th><th>Criado em</th><th></th></tr></thead><tbody id="t-us" onclick="admClick(event)"></tbody></table></div><div class="msg" id="m-us" role="status"></div></div>`;
-function admWatch(){if(!(sess&&sess.admin))return admOff();if(rUs)return;rUs=db.ref(AC+'/usuarios');rUs.on('value',s=>{USERS=s.val()||{};admConsolida();if(tab==='admin')admDraw();if(tab==='presenca')presDraw()})}
-/* Junta cadastros que estavam espalhados em várias linhas (areas/x, mensal...) em uma linha só,
-   para que a própria pessoa receba em tempo real só o seu cadastro. Roda uma vez por perfil. */
-const CONS={};function admConsolida(){Object.keys(USERS).forEach(id=>{const P=AC+'/usuarios/'+id;if(USERS[id]&&!CONS[id]&&Object.keys(KV).some(k=>k.indexOf(P+'/')===0)){CONS[id]=1;db.ref(P).set(cl_(USERS[id]))}})}
-function admOff(){if(rUs)rUs.off();rUs=null;USERS={}}
+let ADMIN_TIMER=null;
+async function refreshProfiles(){if(!sess?.admin)return;const {data,error}=await SB.from('exped_profiles').select('*').order('criado',{ascending:true});if(error){console.warn('Perfis:',error);return}USERS={};(data||[]).forEach(p=>USERS[p.id]={email:p.email,admin:p.admin,aprovado:p.aprovado,mensal:p.mensal,areas:p.areas||{},podeApagar:p.pode_apagar,criado:p.criado});if(tab==='admin')admDraw();if(tab==='presenca')presDraw()}
+function admWatch(){if(!sess?.admin)return admOff();if(ADMIN_TIMER)return;refreshProfiles();ADMIN_TIMER=setInterval(()=>{if(!document.hidden)refreshProfiles()},30000)}
+function admOff(){if(ADMIN_TIMER)clearInterval(ADMIN_TIMER);ADMIN_TIMER=null;USERS={};rUs=null}
 function admDraw(){if(!sess||!sess.admin||!$('t-us'))return;
  const mail=id=>(USERS[id]&&USERS[id].email)||id.replace(/,/g,'.');
  const rows=Object.keys(PRES).map(id=>{const ss=Object.values(PRES[id]||{});if(!ss.length)return null;return{id,onde:[...new Set(ss.map(x=>x.onde||'—'))].join(', '),desde:Math.min(...ss.map(x=>x.em||Date.now())),n:ss.length}}).filter(Boolean).sort((a,b)=>a.desde-b.desde);
@@ -675,24 +676,15 @@ function admDraw(){if(!sess||!sess.admin||!$('t-us'))return;
 <td class="ch">${x.admin?'<span class="bd ok">Tudo liberado</span>':`<div class="chips">${AREAS.map(([k,l])=>{const y=x.areas&&x.areas[k]===true;return `<button type="button" class="chip${y?' y':''}" data-a="area" data-k="${k}" data-id="${i}" aria-pressed="${y}" title="${y?'Clique para bloquear':'Clique para liberar'}">${l}</button>`}).join('')}<button type="button" class="chip ap${x.podeApagar===true?' y':''}" data-a="apagar" data-id="${i}" aria-pressed="${x.podeApagar===true}" title="Apagar e alterar informações sem senha">Apagar/alterar</button></div>`}</td>
 <td><span class="bd${on?' ok':''}">${on?'Conectado':'Desconectado'}</span></td><td>${x.criado?new Date(x.criado).toLocaleDateString('pt-BR'):'—'}</td>
 <td><button class="bt o sm" data-a="del" data-id="${i}"${eu||ult?` disabled title="${eu?'Você não pode excluir o próprio perfil.':'É o único administrador.'}"`:''}>Excluir perfil</button></td></tr>`}).join('')}
-function admClick(ev){const b=ev.target.closest('button[data-a]');if(!b||b.disabled||!sess||!sess.admin)return;
+async function admClick(ev){const b=ev.target.closest('button[data-a]');if(!b||b.disabled||!sess||!sess.admin)return;
  const id=b.dataset.id,x=USERS[id],a=b.dataset.a;if(!x)return;
- const W=o=>db.ref(AC+'/usuarios/'+id).set({...cl_(x),...o}),er=()=>msg('m-us','Não foi possível salvar. Verifique a conexão.','e'),good=t=>msg('m-us',t,'ok'),nm=x.email;
+ const W=async o=>{const patch={};if('aprovado'in o)patch.aprovado=o.aprovado;if('areas'in o)patch.areas=o.areas;if('mensal'in o)patch.mensal=o.mensal;if('podeApagar'in o)patch.pode_apagar=o.podeApagar;const {error}=await SB.from('exped_profiles').update(patch).eq('id',id);if(error)throw error;await refreshProfiles()},er=()=>msg('m-us','Não foi possível salvar. Verifique a conexão.','e'),good=t=>msg('m-us',t,'ok'),nm=x.email;
  if(a==='acesso'){const lib=x.aprovado===false;W({aprovado:lib}).then(()=>good(lib?`Acesso liberado para ${nm}. A pessoa já pode entrar.`:`Acesso de ${nm} bloqueado.`)).catch(er)}
  else if(a==='area'){const k=b.dataset.k,nv=!(x.areas&&x.areas[k]===true);W({areas:{...(x.areas||{}),[k]:nv}}).then(()=>good(`${nv?'Liberado':'Bloqueado'}: ${(AREAS.find(z=>z[0]===k)||[k,k])[1]} para ${nm}.`)).catch(er)}
  else if(a==='apagar'){const nv=x.podeApagar!==true;W({podeApagar:nv}).then(()=>good(`Apagar e alterar ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
  else if(a==='mensal'){const nv=!x.mensal;W({mensal:nv}).then(()=>good(`Monitoramento mensal ${nv?'liberado':'bloqueado'} para ${nm}.`)).catch(er)}
- else if(a==='del'&&confirm(`Excluir o perfil de ${nm}? A pessoa será desconectada e não poderá mais entrar.`)){const u={};u['usuarios/'+id]=null;u['presenca/'+id]=null;db.ref(AC).update(u).then(()=>good(`Perfil de ${nm} excluído.`)).catch(()=>msg('m-us','Não foi possível excluir. Verifique a conexão.','e'))}}
-async function admAdd(ev){ev.preventDefault();if(!sess||!sess.admin)return;const email=$('a-email').value.trim().toLowerCase(),pw=$('a-pw').value;
- if(!okMail(email))return msg('m-add','Digite um e-mail válido, como nome@empresa.com.','e');if(pw.length<8)return msg('m-add','A senha precisa ter pelo menos 8 caracteres.','e');
- $('a-btn').disabled=true;
- try{const ar={};document.querySelectorAll('#f-add [data-area]').forEach(c=>{if(c.checked)ar[c.dataset.area]=true});
-  const salt=crypto.getRandomValues(new Uint8Array(16)),rec={email,salt:b64(salt),hash:await hash(pw,salt),mensal:$('a-mensal').checked,admin:$('a-admin').checked,aprovado:true,areas:ar,podeApagar:$('a-apagar').checked,criado:new Date().toISOString(),criadoPor:sess.email};
-  const r=await db.ref(AC+'/usuarios/'+uidOf(email)).transaction(c=>c?undefined:rec);
-  if(!r.committed)msg('m-add','Este e-mail já tem perfil.','e');else{$('f-add').reset();msg('m-add','Perfil de '+email+' adicionado.','ok')}
- }catch(x){msg('m-add','Não foi possível adicionar. Verifique a conexão.','e')}
- if($('a-btn'))$('a-btn').disabled=false}
-
+ else if(a==='del'&&confirm(`Excluir o perfil de ${nm}? A pessoa será desconectada e não poderá mais entrar.`)){W({aprovado:false}).then(()=>good(`Perfil de ${nm} bloqueado. A conta Auth é preservada.`)).catch(er)}}
+async function admAdd(ev){ev.preventDefault();msg('m-add','Por segurança, o administrador não cria senhas de outras pessoas no navegador. Peça ao colaborador para usar Criar conta, confirmar o e-mail e então libere as áreas aqui.','e')}
 
 // ---------- coletas: horário de corte, placa e motorista ----------
 const COL='contadorColetas',CNL=['Maria','Roberto','Ports 1','Ports 2','Gold','Flex Manhã','Flex Tarde'];let COLS={},CF={dia:'',c:'all',q:''},busyCo=false;
@@ -983,55 +975,54 @@ db.ref(SP).on('value',s=>{SEP=s.val()||{};if(tab==='separacao'&&!document.active
 db.ref(AP).on('value',s=>{ARQ=s.val()||{};rd.a=1;if(tab==='mensal')refresh();arqSync()});
 db.ref(TOMB).on('value',s=>{TOMBS=s.val()||{}});
 db.ref(CFG).on('value',s=>{LCFG=s.val()||{};LIMP={em:Date.parse(LCFG.limpoEm||'')||0,por:LCFG.limpoPor||''};if(tab==='mensal'&&sess&&sess.admin&&document.readyState==='complete')refresh()});
-// ---------- login ----------
-const uidOf=e=>e.trim().toLowerCase().replace(/\./g,','),okMail=e=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e),SID=Math.random().toString(36).slice(2,9);
-const b64=b=>{const a=new Uint8Array(b);let t='';for(let i=0;i<a.length;i++)t+=String.fromCharCode(a[i]);return btoa(t)},un=t=>{const x=atob(t),a=new Uint8Array(x.length);for(let i=0;i<x.length;i++)a[i]=x.charCodeAt(i);return a};
-async function hash(pw,salt){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveBits']);return b64(await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},k,256))}
-const same=(a,b)=>{if(a.length!==b.length)return false;let r=0;for(let i=0;i<a.length;i++)r|=a.charCodeAt(i)^b.charCodeAt(i);return r===0};
-let rU=null,rC=null,rP=null;const lm=(t,k)=>{const e=$('lm');e.textContent=t||'';e.className='msg '+(k||'')};
-let SETUP=false;
-const ltab=u=>{if(SETUP)return;$('fi').hidden=u;$('fu').hidden=!u;$('lti').classList.toggle('on',!u);$('ltu').classList.toggle('on',u);lm('')};
-function checkSetup(){SB.from('kv').select('k').like('k',AC+'/usuarios/%').eq('v->>admin','true').limit(1).then(r=>{if(r.error||(r.data&&r.data.length))return;SETUP=true;$('fi').hidden=true;$('fu').hidden=true;$('fs').hidden=false;const lt=document.querySelector('.lt');if(lt)lt.style.display='none';lm('Nenhum administrador existe ainda. Crie o primeiro para liberar o painel e gerenciar os acessos.','ok')}).catch(()=>{})}
-$('fs').onsubmit=async ev=>{ev.preventDefault();const e=$('se').value.trim().toLowerCase(),pw=$('sp').value;
- if(!okMail(e))return lm('Digite um e-mail válido, como nome@empresa.com.','e');if(pw.length<8)return lm('A senha precisa ter pelo menos 8 caracteres.','e');if(pw!==$('sp2').value)return lm('As senhas não são iguais.','e');
- $('bs').disabled=true;try{const salt=crypto.getRandomValues(new Uint8Array(16)),rec={email:e,salt:b64(salt),hash:await hash(pw,salt),mensal:true,admin:true,aprovado:true,areas:{teste:true,bipagem:true,embalagens:true,pedidos:true,separacao:true},podeApagar:true,criado:new Date().toISOString(),criadoPor:'primeiro acesso'};
- const r=await db.ref(AC+'/usuarios/'+uidOf(e)).transaction(c=>c?undefined:rec);if(!r.committed)lm('Este e-mail já tem perfil.','e');else{try{sessionStorage.setItem('mudLogin',uidOf(e))}catch(x){}$('fs').reset();lm('');start(uidOf(e))}}catch(x){lm('Não foi possível criar. Verifique a conexão.','e')}$('bs').disabled=false};
+// ---------- Login seguro com Supabase Auth ----------
+const okMail=e=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+const SID=Math.random().toString(36).slice(2,9);
+let rU=null,rC=null,rP=null,AUTH_ID=null,PROFILE_TIMER=null,AUTH_BUSY=false;
+const lm=(t,k)=>{const e=$('lm');e.textContent=t||'';e.className='msg '+(k||'')};
+function ltab(u){$('fi').hidden=u;$('fu').hidden=!u;$('fs').hidden=true;$('lti').classList.toggle('on',!u);$('ltu').classList.toggle('on',u);lm('')}
 function hdr(){$('ov').hidden=!!sess;$('bo').hidden=!sess;$('ue').textContent=sess?sess.email:''}
 function stop(){admOff();clearInterval(HBI);presStop();if(rU)rU.off();if(rC)rC.off();rU=rC=rP=null;rd.h=rd.b=rd.a=rd.extra=0;sbUse([])}
-/* O que cada conta baixa e escuta em tempo real */
-function grupos(){const g=['contadorPedidos',EXTRA_PATH,BP,SP,CUT,DEV];g.push(sess.admin?AC:AC+'/usuarios/'+sess.uid);if(sess.admin||sess.mensal){g.push(AP);g.push(TOMB);g.push(CFG)}g.push(COL,FAL);return g}
-/* ---------- presença (quem está online) — Realtime Presence: não grava nada no banco ---------- */
+function grupos(){const g=['contadorPedidos',EXTRA_PATH,BP,SP,CUT,DEV];if(sess.admin||sess.mensal)g.push(AP,TOMB,CFG);g.push(COL,FAL);return g}
 const EM0=Date.now();let PCH=null,PSUB=false,PTRK='';
 function presStart(){if(PCH||!sess)return;PSUB=false;const ch=SB.channel('presenca-online',{config:{presence:{key:sess.uid}}});PCH=ch;
  ch.on('presence',{event:'sync'},()=>{if(PCH!==ch)return;const st=ch.presenceState(),o={};Object.keys(st).forEach(id=>{o[id]={};(st[id]||[]).forEach((m,i)=>{o[id][m.sid||('s'+i)]={em:m.em,onde:m.onde,arq:!!m.arq}})});PRES=o;if((tab==='admin'||tab==='presenca')&&sess&&sess.admin){admDraw();presDraw()}arqSync()})
  .subscribe(st=>{if(PCH!==ch)return;PSUB=st==='SUBSCRIBED';if(PSUB)presTrack(true)})}
 function presTrack(force){if(!PCH||!PSUB||!sess)return;const arq=!!(sess.admin||sess.mensal),k=String(arq);if(!force&&k===PTRK)return;PTRK=k;PCH.track({sid:SID,em:EM0,onde:'Sistema unificado',arq}).catch(()=>{})}
 function presStop(){if(PCH){const c=PCH;PCH=null;try{c.untrack();SB.removeChannel(c)}catch(e){}}PSUB=false;PTRK='';PRES={}}
-/* Só UM aparelho grava o arquivo mensal: o conectado há mais tempo entre admin/monitoramento.
-   Antes, todos os aparelhos gravavam a mesma coisa ao mesmo tempo. */
 function souLider(){const c=[];Object.values(PRES).forEach(o=>Object.entries(o).forEach(([s,m])=>{if(m.arq)c.push({s,em:+m.em||0})}));if(!c.some(x=>x.s===SID))return false;c.sort((a,b)=>a.em-b.em||(a.s<b.s?-1:a.s>b.s?1:0));return c[0].s===SID}
-function out(t){stop();try{localStorage.removeItem('mudLogin');sessionStorage.removeItem('mudLogin')}catch(e){}sess=null;hdr();render();lm(t,t?'e':'')}
-function start(uid){stop();sbUse([AC+'/usuarios/'+uid]);rU=db.ref(AC+'/usuarios/'+uid);rU.on('value',s=>{const u=s.val();if(!u||u.aprovado===false)return out(u?'Seu acesso foi bloqueado pelo administrador.':'Seu acesso foi removido pelo administrador.');
- sess={uid,email:u.email,admin:!!u.admin,areas:u.areas||{},mensal:!!u.mensal,pode:u.podeApagar===true};hdr();sbUse(grupos());presStart();presTrack();admWatch();if(sess.admin||sess.mensal)bkInit();if(!ok(tab))tab='apresentacao';render();arqSync();fechaTick()});}
-$('lti').onclick=()=>ltab(false);$('ltu').onclick=()=>ltab(true);$('bo').onclick=()=>out('Você saiu da conta.');
+function out(t){stop();sess=null;hdr();render();lm(t,t?'e':'')}
+async function startAuth(user){if(!user){AUTH_ID=null;out('');return}if(AUTH_BUSY)return;AUTH_BUSY=true;
+ try{const {data:u,error}=await SB.from('exped_profiles').select('*').eq('id',user.id).single();if(error)throw error;
+ if(!u||!u.aprovado){if(sess)out('Cadastro aguardando aprovação do administrador.');else lm('Conta autenticada, aguardando liberação do administrador.','e');return}
+ const fresh=AUTH_ID!==user.id||!sess;AUTH_ID=user.id;
+ const changed=!sess||JSON.stringify([sess.admin,sess.areas,sess.mensal,sess.pode])!==JSON.stringify([u.admin,u.areas,u.mensal,u.pode_apagar]);
+ if(fresh){stop();sess={uid:user.id,email:user.email,admin:!!u.admin,areas:u.areas||{},mensal:!!u.mensal,pode:!!u.pode_apagar};hdr();sbUse(grupos());presStart();presTrack();admWatch();if(sess.admin||sess.mensal)bkInit();if(!ok(tab))tab='apresentacao';render();arqSync();fechaTick()}
+ else if(changed){sess={uid:user.id,email:user.email,admin:!!u.admin,areas:u.areas||{},mensal:!!u.mensal,pode:!!u.pode_apagar};sbUse(grupos());admWatch();hdr();render()}
+ }catch(e){console.warn('Perfil:',e);lm('Não foi possível consultar seu perfil de acesso. Confira o SQL e as políticas RLS.','e')}finally{AUTH_BUSY=false}}
+$('lti').onclick=()=>ltab(false);$('ltu').onclick=()=>ltab(true);
+$('bo').onclick=async()=>{await SB.auth.signOut();AUTH_ID=null;out('Você saiu da conta.')};
 $('bt').onclick=()=>{const d=document.documentElement,n=(d.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'))==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('tema',n)}catch(e){}};
 try{const t=localStorage.getItem('tema');if(t)document.documentElement.dataset.theme=t}catch(e){}
+$('fs').hidden=true;
 $('fu').onsubmit=async ev=>{ev.preventDefault();const e=$('ue2').value.trim().toLowerCase(),pw=$('up').value;
  if(!okMail(e))return lm('Digite um e-mail válido.','e');if(pw.length<8)return lm('A senha precisa ter pelo menos 8 caracteres.','e');if(pw!==$('up2').value)return lm('As senhas não são iguais.','e');
- $('bu').disabled=true;try{const salt=crypto.getRandomValues(new Uint8Array(16)),rec={email:e,salt:b64(salt),hash:await hash(pw,salt),mensal:false,admin:false,aprovado:false,areas:{},podeApagar:false,criado:new Date().toISOString(),criadoPor:'cadastro'};
- const r=await db.ref(AC+'/usuarios/'+uidOf(e)).transaction(c=>c?undefined:rec);if(!r.committed)lm('Este e-mail já está cadastrado.','e');else{$('fu').reset();ltab(false);$('ie').value=e;lm('Conta criada. O administrador precisa liberar o seu cadastro, as áreas e a permissão de apagar.','ok')}}catch(x){lm('Não foi possível criar a conta. Verifique a internet.','e')}$('bu').disabled=false};
-const fails={};
-$('fi').onsubmit=async ev=>{ev.preventDefault();const e=$('ie').value.trim().toLowerCase(),pw=$('ip').value,f=fails[e]||{n:0,u:0},w=Math.ceil((f.u-Date.now())/1000);
- if(!okMail(e)||!pw)return lm('Digite seu e-mail e sua senha.','e');if(w>0)return lm('Muitas tentativas. Aguarde '+w+' s.','e');
- $('bi').disabled=true;try{const u=(await db.ref(AC+'/usuarios/'+uidOf(e)).once('value')).val(),salt=u&&u.salt?un(u.salt):crypto.getRandomValues(new Uint8Array(16)),h=await hash(pw,salt);
- if(u&&same(h,u.hash)){delete fails[e];if(u.aprovado===false)lm('Seu cadastro ainda não foi liberado pelo administrador.','e');else{try{localStorage.removeItem('mudLogin');sessionStorage.removeItem('mudLogin');($('kp').checked?localStorage:sessionStorage).setItem('mudLogin',uidOf(e))}catch(x){}$('fi').reset();lm('');start(uidOf(e))}}
- else{f.n++;if(f.n>=5){f.u=Date.now()+30000;f.n=0}fails[e]=f;lm('E-mail ou senha incorretos.','e')}}catch(x){lm('Não foi possível entrar. Verifique a internet.','e')}$('bi').disabled=false};
+ $('bu').disabled=true;try{const {data,error}=await SB.auth.signUp({email:e,password:pw});if(error)throw error;
+ $('fu').reset();ltab(false);$('ie').value=e;lm(data.session?'Cadastro criado. Aguarde aprovação do administrador.':'Cadastro solicitado. Confirme seu e-mail, depois aguarde a aprovação do administrador.','ok')
+ }catch(x){lm(x.message||'Não foi possível criar conta.','e')}finally{$('bu').disabled=false}};
+$('fi').onsubmit=async ev=>{ev.preventDefault();const email=$('ie').value.trim().toLowerCase(),password=$('ip').value;
+ if(!okMail(email)||!password)return lm('Informe e-mail e senha válidos.','e');$('bi').disabled=true;
+ try{const {data,error}=await SB.auth.signInWithPassword({email,password});if(error)throw error;await startAuth(data.user)}catch(x){lm(x.message||'Falha no login.','e')}finally{$('bi').disabled=false}};
 $('bsb').onclick=()=>{const c=document.body.classList.toggle('sbc');try{localStorage.setItem('sbc',c?'1':'0')}catch(e){}};
 try{if(localStorage.getItem('sbc')==='1')document.body.classList.add('sbc')}catch(e){}
 setInterval(()=>{const c=$('pclk');if(c)c.textContent=new Date().toLocaleTimeString('pt-BR')},1000);
 setInterval(()=>{if(sess&&isPres()&&rd.h&&rd.b)refresh();if(sess&&tab==='presenca')presDraw()},60000);
 setInterval(()=>{fechaTick()},60000);
-hdr();render();checkSetup();
-let sid=null;try{sid=sessionStorage.getItem('mudLogin')||localStorage.getItem('mudLogin')}catch(e){}
-if(sid)db.ref(AC+'/usuarios/'+sid).once('value').then(s=>{const u=s.val();if(u&&u.aprovado!==false)start(sid)}).catch(()=>{});
+hdr();render();
+SB.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){AUTH_ID=null;out('')}else if(session?.user)setTimeout(()=>startAuth(session.user),0)});
+SB.auth.getUser().then(({data})=>{if(data?.user)startAuth(data.user)});
+/* Verificação periódica mais leve: perfil atualizado na abertura e ao voltar à aba. */
+async function checarPerfilVisivel(){if(document.hidden)return;try{const {data}=await SB.auth.getUser();if(data?.user)await startAuth(data.user)}catch(e){console.warn('Atualização do perfil:',e)}}
+PROFILE_TIMER=setInterval(checarPerfilVisivel,60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){checarPerfilVisivel();if(sess?.admin)refreshProfiles()}});
 </script></body></html>
